@@ -1,1 +1,21 @@
 # Parallel-Hough-Circle-Detector
+
+## SUMMARY
+
+
+## BACKGROUND
+
+
+## THE CHALLENGE
+
+
+## RESOURCES
+
+
+## GOALS AND DELIVERABLES
+
+
+## PLATFORM CHOICE
+
+
+## SCHEDULE
