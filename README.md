@@ -8,7 +8,7 @@ We are going to implement a parallel circle detector using Hough Transform on GP
 ## BACKGROUND
 Hough Transform is an image processing technique used for detection of parametric shapes. 
 
-We choose to implement circle detection with arbitary radius, as we believe an efficient parallel implementation for circle detection will be valuable in a wide range of areas, such as medical image processing, and robot vision.
+We choose to implement circle detection with arbitrary radius, as we believe an efficient parallel implementation for circle detection will be valuable in a wide range of areas, such as medical image processing, and robot vision.
 
 The pipeline of implementing a Hough Circle Detector is as follows:
 - Apply a derivative filter (e.g. Sobel filter) to convert the raw rgb image into a binary image, '1' representing an edge pixel
@@ -30,7 +30,7 @@ Some other research papers we will look into:
 ## GOALS AND DELIVERABLES
 - 75% Implement a working version of CUDA circle detector with known radius (2D accumulator matrix)
 
-- 100% Implement a working version of CUDA circle detector with arbitary radius. Note each part of the pipeline will need to be highly parallelized.
+- 100% Implement a working version of CUDA circle detector with arbitrary radius. Note each part of the pipeline will need to be highly parallelized.
 
 - 125% 
 
