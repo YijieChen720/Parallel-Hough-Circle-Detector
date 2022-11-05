@@ -13,7 +13,7 @@ We choose to implement circle detection with arbitary radius, as we believe an e
 The pipeline of implementing a Hough Circle Detector is as follows:
 - Apply a derivative filter (e.g. Sobel filter) to convert the raw rgb image into a binary image, '1' representing an edge pixel
 - Apply Hough Transform and accumuate the vote of each edge pixel to a 3D accumulator matrix
-- (Optional: use the gradient image to narrow down the search space)
+- (Optional: use the gradient image to narrow down the voting space)
 - Traverse the accumulator matrix and find the local maxima
 
 ## THE CHALLENGE
@@ -23,16 +23,18 @@ Circles construct a 3D parameterized Hough space (a,b,r). Compared with line det
 The starter C++ code will be structured from the current Python code of 16-720 Computer Vision Assignment 1. Note that the Assignment code implements a Hough line detector, so necessary modification is required to extend it to a circle detector. 
 
 Some other research papers we will look into:
-Chen, Su, and Hai Jiang. "[Accelerating the hough transform with CUDA on graphics processing units.](http://worldcomp-proceedings.com/proc/p2011/PDP4179.pdf)"
+- Chen, Su, and Hai Jiang. "[Accelerating the hough transform with CUDA on graphics processing units.](http://worldcomp-proceedings.com/proc/p2011/PDP4179.pdf)"
+- Askari, Meisam, et al. "Parallel gpu implementation of hough transform for circles." 
+- Tasel, Faris Serdar, and Alptekin Temizel. "[Parallelization of hough transform for circles using cuda.](https://on-demand.gputechconf.com/gtc/2012/posters/P0438_ht_poster_gtc2012.pdf)" 
 
 ## GOALS AND DELIVERABLES
-- 75%
+- 75% Implement a working version of CUDA circle detector with known radius (2D accumulator matrix)
 
-- 100%
+- 100% Implement a working version of CUDA circle detector with arbitary radius. Note each part of the pipeline will need to be highly parallelized.
 
-- 125%
+- 125% 
 
 ## PLATFORM CHOICE
-
+We choose to implement this project using C++ on CUDA, as it's an image processing problem that fits well with GPU's architecture feature of high parallelization.
 
 ## SCHEDULE
