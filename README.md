@@ -32,9 +32,14 @@ Some other research papers we will look into:
 
 - 100% Implement a working version of CUDA circle detector with arbitrary radius. Note each part of the pipeline will need to be highly parallelized.
 
-- 125% 
+- 125% Implement the inverse-checkcing mapping strategy proposed in [Accelerating the hough transform with CUDA on graphics processing units.](http://worldcomp-proceedings.com/proc/p2011/PDP4179.pdf) which is more space efficient.
 
 ## PLATFORM CHOICE
-We choose to implement this project using C++ on CUDA, as it's an image processing problem that fits well with GPU's architecture feature of high parallelization.
+We choose to implement this project using C++ on CUDA, as it's an image processing problem that fits well with GPU's feature of massively parallel execution.
 
 ## SCHEDULE
+11/06 - 11/12 Conduct literature review to better understand the problem. Environment setup on GHC machine. Implement the sequential version .
+11/13 - 11/19 Design parallel strategies for each component in the pipeline
+11/20 - 11/26 Implement a parallel version in CUDA
+11/27 - 12/03 Benchmark and optimize the parallel version
+12/04 - 12/08 Write report and prepare for poster session
