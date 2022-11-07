@@ -1,4 +1,4 @@
-# Parallel Object Detector with Generalized Hough
+# Parallel Object Detector with Generalized Hough Transform
 
 This is 2022 Fall 15-618 Final Project by Yiliu Xu(yiliux), Yijie Chen(yijieche).
 
@@ -6,14 +6,12 @@ This is 2022 Fall 15-618 Final Project by Yiliu Xu(yiliux), Yijie Chen(yijieche)
 We are going to implement a parallel object detector using generalized Hough Transform on GPU. 
 
 ## BACKGROUND
-Hough Transform is an image processing technique used for detection of parametric shapes. 
+Hough Transform is an image processing technique used for detecting parametric shapes, such as lines and circles. [A generalized version of Hough Transform](http://www.eng.tau.ac.il/~cvapps/Supplement/%5B%201981%20%5D%20Generalizing%20the%20Hough%20Transform%20to%20Detect%20Arbitrary%20Shapes.pdf) proposed by Ballard is able to detect any arbitrary shapes, even ones that cannot be described by equations, by encoding the input template shape and mapping the raw image into a Hough Transform space. We believe an efficient parallel implementation for generalized Hough detector will be valuable in a wide range of areas, such as medical image processing, and robot vision.
 
-We choose to implement circle detection with arbitrary radius, as we believe an efficient parallel implementation for circle detection will be valuable in a wide range of areas, such as medical image processing, and robot vision.
-
-The pipeline of implementing a Hough Circle Detector is as follows:
-- Apply a derivative filter (e.g. Sobel filter) to convert the raw rgb image into a binary image, '1' representing an edge pixel
-- Apply Hough Transform and accumuate the vote of each edge pixel to a 3D accumulator matrix
-- (Optional: use the gradient image to narrow down the voting space)
+The pipeline of implementing a Generalized Hough Detector is as follows:
+- Apply a derivative filter (e.g. Sobel filter) on both the template image and raw image to detect all edge pixels
+- Encode all edge points of the template shape into an R-table
+- Apply Generalized Hough Transform on the raw image, accumulate the vote of each edge pixel into a 4D accumulator matrix $(x_c, y_c, s, \theta)$
 - Traverse the accumulator matrix and find the local maxima
 
 ## THE CHALLENGE
