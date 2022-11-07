@@ -1,9 +1,9 @@
-# Parallel Hough Circle Detector
+# Parallel Object Detector with Generalized Hough
 
 This is 2022 Fall 15-618 Final Project by Yiliu Xu(yiliux), Yijie Chen(yijieche).
 
 ## SUMMARY
-We are going to implement a parallel circle detector using Hough Transform on GPU. 
+We are going to implement a parallel object detector using generalized Hough Transform on GPU. 
 
 ## BACKGROUND
 Hough Transform is an image processing technique used for detection of parametric shapes. 
