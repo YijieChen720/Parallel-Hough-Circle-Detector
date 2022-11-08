@@ -18,12 +18,11 @@ The pipeline of implementing a Generalized Hough Detector is as follows:
 Circles construct a 3D parameterized Hough space (a,b,r). Compared with line detection which forms a 2D space, the circle detection problem adds one more degree of computation complexity. In addition, it requires a large memory capacity to store the 3D accumulator. It's challenging to design and deploy CUDA program to achieve high performance, memory efficiency and reduced communication. 
 
 ## RESOURCES
-The starter C++ code will be structured from the current Python code of 16-720 Computer Vision Assignment 1. Note that the Assignment code implements a Hough line detector, so necessary modification is required to extend it to a circle detector. 
+The starter C++ code will be structured from this [github repo](https://github.com/jguillon/generalized-hough-tranform). Note that the reference code uses OpenCV to compute image gradient, but we will write the convolution filter from stratch in order to parallelize the code using CUDA.
 
 Some other research papers we will look into:
+- Ballard, Dana H. "[Generalizing the Hough transform to detect arbitrary shapes.](https://www.sciencedirect.com/science/article/abs/pii/0031320381900091)"
 - Chen, Su, and Hai Jiang. "[Accelerating the hough transform with CUDA on graphics processing units.](http://worldcomp-proceedings.com/proc/p2011/PDP4179.pdf)"
-- Askari, Meisam, et al. "Parallel gpu implementation of hough transform for circles." 
-- Tasel, Faris Serdar, and Alptekin Temizel. "[Parallelization of hough transform for circles using cuda.](https://on-demand.gputechconf.com/gtc/2012/posters/P0438_ht_poster_gtc2012.pdf)" 
 
 ## GOALS AND DELIVERABLES
 - 75% Implement a working version of CUDA circle detector with known radius (2D accumulator matrix)
