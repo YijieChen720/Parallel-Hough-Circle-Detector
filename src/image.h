@@ -1,17 +1,18 @@
 #pragma once
+#include <vector>
 
 class Image {
-private:
-    int width;
-    int height;
-    float* data;
-    
 public:
     Image () {}
 
-    Image (int w, int h) {
+    void setImage (int w, int h) {
         width = w;
         height = h;
-        data = new float[4 * width * height];
+
+        data = new unsigned char[3 * width * height];
     }
+
+    int width;
+    int height;
+    unsigned char* data; // 0-255
 };
