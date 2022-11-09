@@ -15,7 +15,7 @@ The pipeline of implementing a Generalized Hough Detector is as follows:
 - Traverse the accumulator matrix and find the local maxima
 
 ## THE CHALLENGE
-Circles construct a 3D parameterized Hough space (a,b,r). Compared with line detection which forms a 2D space, the circle detection problem adds one more degree of computation complexity. In addition, it requires a large memory capacity to store the 3D accumulator. It's challenging to design and deploy CUDA program to achieve high performance, memory efficiency and reduced communication. 
+We aim to construct a 4D parameterized Hough space (x, y, scale, rotation) to detect arbitrary input shapes. Above all, generalized hough algorithm requires more computation and processing for non-analytic curves than simple lines or circles. Besides, compared with the detection with invariant scale and rotation in 2D space, this detection problem adds two more degree of computation complexity. In addition, it requires a large memory capacity to store the 4D accumulator. It's challenging to design and deploy CUDA program to achieve high performance, memory efficiency and reduced communication. 
 
 ## RESOURCES
 The starter C++ code will be structured from this [github repo](https://github.com/jguillon/generalized-hough-tranform). Note that the reference code uses OpenCV to compute image gradient, but we will write the convolution filter from stratch in order to parallelize the code using CUDA.
@@ -25,11 +25,11 @@ Some other research papers we will look into:
 - Chen, Su, and Hai Jiang. "[Accelerating the hough transform with CUDA on graphics processing units.](http://worldcomp-proceedings.com/proc/p2011/PDP4179.pdf)"
 
 ## GOALS AND DELIVERABLES
-- 75% Implement a working version of CUDA circle detector with known radius (2D accumulator matrix)
+- 75% Implement a working version of CUDA Generalized Hough detector with known scale and rotation (2D accumulator matrix)
 
-- 100% Implement a working version of CUDA circle detector with arbitrary radius. Note each part of the pipeline will need to be highly parallelized.
+- 100% Implement a working version of CUDA Generalized Hough detector with arbitrary scale and rotation. Note each part of the pipeline will need to be highly parallelized.
 
-- 125% Implement the inverse-checkcing mapping strategy proposed in [Accelerating the hough transform with CUDA on graphics processing units](http://worldcomp-proceedings.com/proc/p2011/PDP4179.pdf) which is more space efficient.
+- 125% Optimize the Generalized Hough detector by using [Halide](https://halide-lang.org/) and improve detector's performance.
 
 ## PLATFORM CHOICE
 We choose to implement this project using C++ on CUDA, as it's an image processing problem that fits well with GPU's feature of massively parallel execution.
