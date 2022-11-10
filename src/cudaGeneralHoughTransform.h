@@ -4,7 +4,6 @@
 
 class CudaGeneralHoughTransform : public GeneralHoughTransform {
 private:
-    Image* tpl, src;
 
 public:
     CudaGeneralHoughTransform();
@@ -12,5 +11,5 @@ public:
     virtual ~CudaGeneralHoughTransform();
 
 private:
-    void convolve(int **filter, size_t k, Image& result);
+    // void convolve(int **filter, size_t k, const GrayImage* source, GrayImage& result) override;
 };

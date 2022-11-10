@@ -6,33 +6,13 @@ int getValue(char *line, int &pos);
 
 // Only supports P6 with 255 color range
 // Code borrowed from: https://www.delftstack.com/howto/cpp/read-ppm-file-cpp/
-bool readPPMImage(std::string filename, Image& result) {
+bool readPPMImage(std::string filename, Image* result) {
     FILE *read = fopen(filename.c_str(),"rb");
     if (!read) {
         std::cerr << "Unable to open the file " << filename << "\n";
         return false;
     }
-
-    // unsigned char header[15], *image;
-    // fread(header, 15, 1, read);
-    // if (header[0] != 'P' || header[1] != '6'){
-    //     std::cerr << "File format not supported\n";
-    //     return false;
-    // }
-
-    // int pos = 3;
-    // int width = getDimension(header, pos);
-    // pos++;
-    // int height = getDimension(header, pos);
-    // std::cout << "Width:" << width << "\tHeight:" << height << '\n';
-    
-    // pos++;
-    // int maxColorValue = getMaxColorValue(header, pos);
-    // std::cout << "Max Color Value:" << maxColorValue << '\n';
-    // if (maxColorValue != 255) {
-    //     std::cerr << "File format not supported\n";
-    //     return false;
-    // }
+    std::cout << "Loading Image: " << filename << std::endl;
 
     char magicNumber[256];
     fgets(magicNumber, 256, read);
@@ -60,8 +40,8 @@ bool readPPMImage(std::string filename, Image& result) {
         return false;
     }
 
-    result.setImage(width, height);
-    fread(result.data, 3 * width * height, 1, read);
+    result->setImage(width, height);
+    fread(result->data, 3 * width * height, 1, read);
     fclose(read);
 
     return true;

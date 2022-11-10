@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
+#include <iostream>
 
 #include "generalHoughTransform.h"
 #include "seqGeneralHoughTransform.h"
@@ -26,7 +27,7 @@ int main(int argc, char** argv) {
         {0 ,0, 0, 0}
     };
     
-    GeneralHoughTransform* hgt;
+    GeneralHoughTransform* ght;
     std::string templateFilename, sourceFilename;
 
     while ((opt = getopt_long(argc, argv, "t:s:r:h", long_options, NULL)) != EOF) {
@@ -44,10 +45,10 @@ int main(int argc, char** argv) {
         case 'r':
             if (std::string(optarg).compare("seq") == 0) {
                 printf("Using sequential implementation\n");
-                // hgt = new SeqGeneralHoughTransform();
+                ght = new SeqGeneralHoughTransform();
             } else if (std::string(optarg).compare("cuda") == 0) {
                 printf("Using cuda implementation\n");
-                // hgt = new CudaGeneralHoughTransform();
+                // ght = new CudaGeneralHoughTransform();
             }
             break;
         case 'h':
@@ -58,7 +59,17 @@ int main(int argc, char** argv) {
     }
     // end parsing of commandline options //////////////////////////////////////
 
-    Image templateImage;
-    readPPMImage(templateFilename, templateImage);
+    // Image* templateImage = new Image;
+    // readPPMImage(templateFilename, templateImage);
     // writePPMImage(&templateImage, "test.ppm");
+
+    std::cout << "***Loading images.***\n";
+    if (!ght->loadTemplate(templateFilename) || !ght->loadSource(sourceFilename)) {
+        std::cerr << "***Failed to load images.***\n";
+        return 1;
+    }
+    std::cout << "***Finished loading images.***\n";
+
+    // ght->processTemplate();
+    // ght->accumulateSource();
 }

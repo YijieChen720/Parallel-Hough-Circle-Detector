@@ -1,17 +1,20 @@
 #pragma once
 #include "image.h"
+#include <stdlib.h>
 
 class GeneralHoughTransform {
 public: 
-    virtual ~GeneralHoughTransform() {};
+    virtual ~GeneralHoughTransform(){};
 
-    bool loadTemplate(std::string filename);
+    virtual void processTemplate() = 0;
 
-    bool loadSource(std::string filename);
+    virtual void accumulateSource() = 0;
+
+    virtual bool loadTemplate(std::string filename) = 0;
+
+    virtual bool loadSource(std::string filename) = 0;
 
 private:
-    bool loadImage(std::string filename);
-    
     // Apply a kxk filter
-    virtual void convolve(int **filter, size_t k, Image& result) = 0;
+    virtual void convolve(int **filter, size_t k, const GrayImage* source, GrayImage& result) = 0;
 };
