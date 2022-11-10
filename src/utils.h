@@ -12,4 +12,4 @@ bool readPPMImage(std::string filename, Image* result);
 
 void writePPMImage(const Image* image, std::string filename);
 
-void convertToGray(const Image* image, GrayImage& result);
+void writeGrayPPMImage(const GrayImage* image, std::string filename);

@@ -66,6 +66,32 @@ void writePPMImage(const Image* image, std::string filename) {
     printf("Wrote image file %s\n", filename.c_str());
 }
 
+void writeGrayPPMImage(const GrayImage* image, std::string filename) {
+    FILE *fp = fopen(filename.c_str(), "wb");
+
+    if (!fp) {
+        fprintf(stderr, "Error: could not open %s for write\n", filename.c_str());
+        exit(1);
+    }
+
+    // write ppm header
+    fprintf(fp, "P6\n");
+    fprintf(fp, "%d %d\n", image->width, image->height);
+    fprintf(fp, "255\n");
+
+    unsigned char* colored = new unsigned char[3 * image->width * image->height];
+    for (int i = 0; i < image->width * image->height; i++) {
+        colored[i * 3] = image->data[i];
+        colored[i * 3 + 1] = image->data[i];
+        colored[i * 3 + 2] = image->data[i];
+    }
+    fwrite(colored, 3 * image->width * image->height, 1, fp);
+    delete[] colored;
+
+    fclose(fp);
+    printf("Wrote image file %s\n", filename.c_str());
+}
+
 int getValue(char *line, int &pos) {
     int res = 0;
     for (; line[pos] != '\n' && line[pos] != ' ' && line[pos] != '\0'; pos++)

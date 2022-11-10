@@ -17,6 +17,8 @@ struct Image {
 };
 
 struct GrayImage {
+    GrayImage() : width(0), height(0), data(nullptr) {}
+
     void setGrayImage (int w, int h) {
         width = w;
         height = h;
