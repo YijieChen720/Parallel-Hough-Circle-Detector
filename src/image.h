@@ -23,10 +23,10 @@ struct GrayImage {
         width = w;
         height = h;
 
-        data = new unsigned char[width * height];
+        data = new float[width * height];
     }
 
     int width;
     int height;
-    unsigned char* data; // 0-255
+    float* data;
 };

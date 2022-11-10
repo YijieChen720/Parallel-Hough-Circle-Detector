@@ -4,6 +4,12 @@
 // To extract value from header
 int getValue(char *line, int &pos);
 
+unsigned char clamp(float value, unsigned char minV, unsigned char maxV) {
+    if (value < minV) return minV;
+    if (value > maxV) return maxV;
+    return static_cast<unsigned char>(value);
+}
+
 // Only supports P6 with 255 color range
 // Code borrowed from: https://www.delftstack.com/howto/cpp/read-ppm-file-cpp/
 bool readPPMImage(std::string filename, Image* result) {
@@ -81,15 +87,15 @@ void writeGrayPPMImage(const GrayImage* image, std::string filename) {
 
     unsigned char* colored = new unsigned char[3 * image->width * image->height];
     for (int i = 0; i < image->width * image->height; i++) {
-        colored[i * 3] = image->data[i];
-        colored[i * 3 + 1] = image->data[i];
-        colored[i * 3 + 2] = image->data[i];
+        colored[i * 3] = clamp(image->data[i], 0, 255);
+        colored[i * 3 + 1] = clamp(image->data[i], 0, 255);
+        colored[i * 3 + 2] = clamp(image->data[i], 0, 255);
     }
     fwrite(colored, 3 * image->width * image->height, 1, fp);
     delete[] colored;
 
     fclose(fp);
-    printf("Wrote image file %s\n", filename.c_str());
+    printf("Wrote gray scale image file %s\n", filename.c_str());
 }
 
 int getValue(char *line, int &pos) {

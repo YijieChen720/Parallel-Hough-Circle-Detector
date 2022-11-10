@@ -1,10 +1,12 @@
 #include <string>
 #include <iostream>
+#include <cmath>
 
 #include "seqGeneralHoughTransform.h"
 #include "utils.h"
 
 const int THRESHOLD = 30;
+const float PI = 3.14159265;
 
 SeqGeneralHoughTransform::SeqGeneralHoughTransform() {
     tpl = new Image;
@@ -92,7 +94,7 @@ bool SeqGeneralHoughTransform::loadSource(std::string filename) {
 void SeqGeneralHoughTransform::convertToGray(const Image* image, GrayImage* result) {
     result->setGrayImage(image->width, image->height);
     for (int i = 0; i < image->width * image->height; i++) {
-        result->data[i] = static_cast<unsigned char>((image->data[3 * i] + image->data[3 * i + 1] + image->data[3 * i + 2]) / 3);
+        result->data[i] = (image->data[3 * i] + image->data[3 * i + 1] + image->data[3 * i + 2]) / 3.f;
     }
 }
 
@@ -101,15 +103,25 @@ void SeqGeneralHoughTransform::convolve(std::vector<std::vector<int>> filter, si
 }
 
 void SeqGeneralHoughTransform::magnitude(const GrayImage* gradientX, const GrayImage* gradientY, GrayImage* result) {
-
+    result->setGrayImage(gradientX->width, gradientX->height);
+    for (int i = 0; i < gradientX->width * gradientX->height; i++) {
+        result->data[i] = sqrt(gradientX->data[i] * gradientX->data[i] + gradientY->data[i] * gradientY->data[i]);
+    }
 }
 
 void SeqGeneralHoughTransform::orientation(const GrayImage* gradientX, const GrayImage* gradientY, GrayImage* result) {
-
+    result->setGrayImage(gradientX->width, gradientX->height);
+    for (int i = 0; i < gradientX->width * gradientX->height; i++) {
+        result->data[i] = fmod(atan2(gradientY->data[i], gradientX->data[i]) * 180 / PI + 360, 360);
+    }
 }
 
 void SeqGeneralHoughTransform::threshold(const GrayImage* magnitude, GrayImage* result, int threshold) {
-
+    result->setGrayImage(magnitude->width, magnitude->height);
+    for (int i = 0; i < magnitude->width * magnitude->height; i++) {
+        if (magnitude->data[i] > threshold) result->data[i] = 255;
+        else result->data[i] = 0;
+    }
 }
 
 void SeqGeneralHoughTransform::createRTable(const GrayImage* orientation, const GrayImage* magnitude) {
