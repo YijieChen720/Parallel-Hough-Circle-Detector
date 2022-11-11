@@ -3,8 +3,8 @@
 #include <string>
 
 struct rEntry {
-    float x;
-    float y;
+    int x;
+    int y;
     float alpha; // arctan2 is expensive, only do it once
 };
 

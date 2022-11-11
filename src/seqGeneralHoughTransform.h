@@ -28,7 +28,7 @@ private:
 
     void convertToGray(const Image* image, GrayImage* result);
     
-    void convolve(std::vector<std::vector<int>> filter, size_t k, const GrayImage* source, GrayImage* result);
+    void convolve(std::vector<std::vector<int>> filter, const GrayImage* source, GrayImage* result);
 
     void magnitude(const GrayImage* gradientX, const GrayImage* gradientY, GrayImage* result);
 
