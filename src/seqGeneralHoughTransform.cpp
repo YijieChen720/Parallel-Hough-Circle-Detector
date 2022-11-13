@@ -7,8 +7,11 @@
 
 const int THRESHOLD = 50;
 const float PI = 3.14159265;
-const int nSlices = 72;
-const float deltaRotationAngle = 360 / nSlices;
+const int nRotationSlices = 72;
+const float deltaRotationAngle = 360 / nRotationSlices;
+const float MAXSCALE = 2.0f;
+const float deltaScaleRatio = 0.5f;
+const int nScaleSlices = MAXSCALE / deltaScaleRatio;
 
 SeqGeneralHoughTransform::SeqGeneralHoughTransform() {
     tpl = new Image;
@@ -69,25 +72,111 @@ void SeqGeneralHoughTransform::processTemplate() {
 
 void SeqGeneralHoughTransform::accumulateSource() {
     // -------Reuse from processTemplate-------
-    // convert template to gray image
+    // convert source to gray image
+    GrayImage* graySrc = new GrayImage;
+    convertToGray(src, graySrc);
 
     // apply sobel_x -> grayscale image x
+    std::vector<std::vector<int>> sobelX = {{1, 0, -1}, {2, 0, -2}, {1, 0, -1}};
+    GrayImage* gradientX = new GrayImage;
+    convolve(sobelX, graySrc, gradientX);
 
     // apply soble_y -> grayscale image y
+    std::vector<std::vector<int>> sobelY = {{1, 2, 1}, {0, 0, 0}, {-1, -2, -1}};
+    GrayImage* gradientY = new GrayImage;
+    convolve(sobelY, graySrc, gradientY);
 
     // grascale magnitude = sqrt(square(x) + square(y))
+    GrayImage* mag = new GrayImage;
+    magnitude(gradientX, gradientY, mag);
 
     // grascale gradient = (np.degrees(np.arctan2(image_y,image_x))+360)%360
+    GrayImage* orient = new GrayImage;
+    orientation(gradientX, gradientY, orient);
 
     // apply a threshold to get a binary image (255 is edge)
-
+    GrayImage* magThreshold = new GrayImage;
+    threshold(mag, magThreshold, THRESHOLD);
     // -------Reuse from processTemplate ends-------
 
-    // initialize accumulator array (4D: Width x Height x Scale x Rotation)
+    // GrayImage* phiDirection = new GrayImage;
+    // phiDirection(orient, magThreshold, phiDirection);
+
+    // initialize accumulator array (4D: Scale x Rotation x Width x Height)
+    int width = magThreshold->width;
+    int height = magThreshold->height;
+    std::vector<std::vector<std::vector<std::vector<int>>>> accumulator(nScaleSlices, std::vector<std::vector<std::vector<int>>>(nRotationSlices, std::vector<std::vector<int>>(width, std::vector<int>(height, 0))));
 
     // Each edge pixel vote
+    printf("------Start calculating accumulator-------\n");
+    int totalEgdes = 0;
+    for (int j = 0 ; j < height; j++) {
+        for (int i = 0 ; i < width; i++) {
+            if (magThreshold->data[j * width + i] > 254) {
+                totalEgdes++;
+                // calculate edge gradient
+                float phi = orient->data[j * width + i]; // gradient direction in [0,360)
+                int iSlice = static_cast<int>(phi / deltaRotationAngle);
+                std::vector<rEntry> entries = rTable[iSlice];
+                for (int k = 0 ; k < entries.size(); k++){
+                    float r = sqrt(entries[k].x*entries[k].x + entries[k].y*entries[k].y);
+                    float alpha = entries[k].alpha;
+                    for (int is = 1; is <= nScaleSlices; is++){
+                        float s = is*deltaScaleRatio;
+                        for (int itheta = 0; itheta < nRotationSlices; itheta++){
+                            float theta = itheta*deltaRotationAngle/(2*PI);
+                            int xc = i + round(r*s*cos(alpha+theta));
+                            int yc = j + round(r*s*sin(alpha+theta));
+                            if (xc>=0 && xc<width && yc>=0 && yc<height){
+                                accumulator[is-1][itheta][xc][yc]++;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // printf("total edges: %d\n", totalEgdes);
+    printf("------End calculating accumulator-------\n");
 
-    // Find all local maxima
+    // find local maxima
+    for (int is = 1; is <= nScaleSlices; is++){
+        for (int itheta = 0; itheta < nRotationSlices; itheta++){
+            int maximaThres = round(totalEgdes*is*deltaScaleRatio*0.7);
+            //printf("s: %f, theta: %f, maxima threshold: %d\n", is*deltaScaleRatio, itheta*deltaRotationAngle, maximaThres);
+            for (int i = 0; i < width ; i++){
+                for (int j = 0; j < height; j++){
+                    if (localMaxima(accumulator[is-1][itheta], i, j, maximaThres)){
+                        hitPoints.push_back((struct Point){i, j});
+                        printf("hit points: %d %d hits: %d\n", i, j, accumulator[is-1][itheta][i][j]);
+                    }
+                }
+            }
+        }
+    }
+
+    // memory deallocation
+    delete graySrc;
+    delete gradientX;
+    delete gradientY;
+    delete mag;
+    delete orient;
+    delete magThreshold;
+}
+
+bool SeqGeneralHoughTransform::localMaxima(std::vector<std::vector<int>> accum, int i, int j, int maximaThres){
+    if (accum[i][j] < maximaThres) return false;
+    int boundRight = (i+1 < accum.size())? i+1 : accum.size()-1;
+    int boundLeft = (i-1 >= 0)? i-1 : 0;
+    int boundTop = (j+1 < accum.size())? j+1 : accum[0].size()-1;
+    int boundBottom = (j-1 >= 0)? j-1 : 0;
+    for (int ii = boundLeft; ii <= boundRight ; ii++){
+        for (int jj = boundBottom; jj <= boundTop; jj++){
+            if (ii==i && jj==j) continue;
+            if (accum[ii][jj] >= accum[i][j]) return false;
+        }
+    }
+    return true;
 }
 
 bool SeqGeneralHoughTransform::loadTemplate(std::string filename) {
@@ -155,9 +244,17 @@ void SeqGeneralHoughTransform::threshold(const GrayImage* magnitude, GrayImage* 
     }
 }
 
+// void SeqGeneralHoughTransform::phiDirection(const GrayImage* orientation, const GrayImage* magThreshold, GrayImage* result) {
+//     result->setGrayImage(orientation->width, orientation->height);
+//     for (int i = 0; i < orientation->width * orientation->height; i++) {
+//         if (magThreshold->data[i] > 0) result->data[i] = orientation->data[i];
+//         else result->data[i] = 0;
+//     }
+// }
+
 void SeqGeneralHoughTransform::createRTable(const GrayImage* orientation, const GrayImage* magThreshold) {
     rTable.clear();
-    rTable.resize(nSlices);
+    rTable.resize(nRotationSlices);
 
     centerX = orientation->width / 2;
     centerY = orientation->height / 2;

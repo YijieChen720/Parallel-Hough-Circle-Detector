@@ -24,6 +24,7 @@ private:
     Image* tpl;
     Image* src;
     int centerX, centerY;
+    std::vector<Point> hitPoints;
     std::vector<std::vector<rEntry>> rTable;
 
     void convertToGray(const Image* image, GrayImage* result);
@@ -37,4 +38,6 @@ private:
     void threshold(const GrayImage* magnitude, GrayImage* result, int threshold);
 
     void createRTable(const GrayImage* orientation, const GrayImage* magnitude);
+
+    bool localMaxima(std::vector<std::vector<int>> accum, int i, int j, int maximaThres);
 };

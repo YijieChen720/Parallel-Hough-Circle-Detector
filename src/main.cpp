@@ -61,7 +61,7 @@ int main(int argc, char** argv) {
 
     // Image* templateImage = new Image;
     // readPPMImage(templateFilename, templateImage);
-    // writePPMImage(&templateImage, "test.ppm");
+    // writePPMImage(templateImage, "test.ppm");
 
     std::cout << "***Loading images.***\n";
     if (!ght->loadTemplate(templateFilename) || !ght->loadSource(sourceFilename)) {
@@ -71,5 +71,6 @@ int main(int argc, char** argv) {
     std::cout << "***Finished loading images.***\n";
 
     ght->processTemplate();
-    // ght->accumulateSource();
+    ght->accumulateSource();
+    delete ght;
 }

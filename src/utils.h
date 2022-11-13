@@ -8,6 +8,11 @@ struct rEntry {
     float alpha; // arctan2 is expensive, only do it once
 };
 
+struct Point{
+    int x;
+    int y;
+};
+
 bool readPPMImage(std::string filename, Image* result);
 
 void writePPMImage(const Image* image, std::string filename);
