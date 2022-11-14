@@ -11,6 +11,9 @@ struct rEntry {
 struct Point{
     int x;
     int y;
+    int hits;
+    float scale;
+    float rotation;
 };
 
 bool readPPMImage(std::string filename, Image* result);

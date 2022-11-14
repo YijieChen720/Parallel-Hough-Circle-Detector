@@ -9,9 +9,12 @@ const int THRESHOLD = 50;
 const float PI = 3.14159265;
 const int nRotationSlices = 72;
 const float deltaRotationAngle = 360 / nRotationSlices;
-const float MAXSCALE = 2.0f;
-const float deltaScaleRatio = 0.5f;
-const int nScaleSlices = MAXSCALE / deltaScaleRatio;
+const float MAXSCALE = 1.2f;
+const float MINSCALE = 0.8f;
+const float deltaScaleRatio = 0.1f;
+const int nScaleSlices = (MAXSCALE - MINSCALE) / deltaScaleRatio + 1;
+const int blockSize = 10;
+const float thresRatio = 0.9;
 
 SeqGeneralHoughTransform::SeqGeneralHoughTransform() {
     tpl = new Image;
@@ -99,36 +102,42 @@ void SeqGeneralHoughTransform::accumulateSource() {
     threshold(mag, magThreshold, THRESHOLD);
     // -------Reuse from processTemplate ends-------
 
-    // GrayImage* phiDirection = new GrayImage;
-    // phiDirection(orient, magThreshold, phiDirection);
-
     // initialize accumulator array (4D: Scale x Rotation x Width x Height)
     int width = magThreshold->width;
     int height = magThreshold->height;
     std::vector<std::vector<std::vector<std::vector<int>>>> accumulator(nScaleSlices, std::vector<std::vector<std::vector<int>>>(nRotationSlices, std::vector<std::vector<int>>(width, std::vector<int>(height, 0))));
+    std::vector<std::vector<Point>> blockMaxima(width/blockSize+1, std::vector<Point>(height/blockSize+1, (struct Point){0, 0, 0, 0.f, 0.f}));
 
     // Each edge pixel vote
     printf("------Start calculating accumulator-------\n");
-    int totalEgdes = 0;
+    int _max = 0;
     for (int j = 0 ; j < height; j++) {
         for (int i = 0 ; i < width; i++) {
             if (magThreshold->data[j * width + i] > 254) {
-                totalEgdes++;
                 // calculate edge gradient
                 float phi = orient->data[j * width + i]; // gradient direction in [0,360)
                 int iSlice = static_cast<int>(phi / deltaRotationAngle);
                 std::vector<rEntry> entries = rTable[iSlice];
-                for (int k = 0 ; k < entries.size(); k++){
-                    float r = sqrt(entries[k].x*entries[k].x + entries[k].y*entries[k].y);
-                    float alpha = entries[k].alpha;
-                    for (int is = 1; is <= nScaleSlices; is++){
-                        float s = is*deltaScaleRatio;
+                for (auto entry: entries){
+                    float r = sqrt(entry.x*entry.x + entry.y*entry.y);
+                    float alpha = entry.alpha;
+                    for (int is = 0; is < nScaleSlices; is++){
+                        float s = is*deltaScaleRatio+MINSCALE;
                         for (int itheta = 0; itheta < nRotationSlices; itheta++){
                             float theta = itheta*deltaRotationAngle/(2*PI);
                             int xc = i + round(r*s*cos(alpha+theta));
                             int yc = j + round(r*s*sin(alpha+theta));
                             if (xc>=0 && xc<width && yc>=0 && yc<height){
-                                accumulator[is-1][itheta][xc][yc]++;
+                                accumulator[is][itheta][xc][yc]++;
+                                // find maximum for each block
+                                if (accumulator[is][itheta][xc][yc] > blockMaxima[xc/blockSize][yc/blockSize].hits){
+                                    blockMaxima[xc/blockSize][yc/blockSize].hits = accumulator[is][itheta][xc][yc];
+                                    blockMaxima[xc/blockSize][yc/blockSize].x = xc;
+                                    blockMaxima[xc/blockSize][yc/blockSize].y = yc;
+                                    blockMaxima[xc/blockSize][yc/blockSize].scale = s;
+                                    blockMaxima[xc/blockSize][yc/blockSize].rotation = theta;
+                                    _max = (blockMaxima[xc/blockSize][yc/blockSize].hits > _max)? blockMaxima[xc/blockSize][yc/blockSize].hits: _max;
+                                }
                             }
                         }
                     }
@@ -136,21 +145,17 @@ void SeqGeneralHoughTransform::accumulateSource() {
             }
         }
     }
-    // printf("total edges: %d\n", totalEgdes);
+    printf("max value in accumulator: %d\n", _max);
     printf("------End calculating accumulator-------\n");
 
     // find local maxima
-    for (int is = 1; is <= nScaleSlices; is++){
-        for (int itheta = 0; itheta < nRotationSlices; itheta++){
-            int maximaThres = round(totalEgdes*is*deltaScaleRatio*0.7);
-            //printf("s: %f, theta: %f, maxima threshold: %d\n", is*deltaScaleRatio, itheta*deltaRotationAngle, maximaThres);
-            for (int i = 0; i < width ; i++){
-                for (int j = 0; j < height; j++){
-                    if (localMaxima(accumulator[is-1][itheta], i, j, maximaThres)){
-                        hitPoints.push_back((struct Point){i, j});
-                        printf("hit points: %d %d hits: %d\n", i, j, accumulator[is-1][itheta][i][j]);
-                    }
-                }
+    int maximaThres = round(_max * thresRatio);
+    for (int i = 0; i <= width/blockSize ; i++){
+        for (int j = 0; j <= height/blockSize; j++){
+            if (localMaxima(blockMaxima, i, j, maximaThres)){
+                Point p = (struct Point){blockMaxima[i][j].x, blockMaxima[i][j].y, blockMaxima[i][j].hits, blockMaxima[i][j].scale, blockMaxima[i][j].rotation};
+                hitPoints.push_back(p);
+                printf("hit points: %d %d hits: %d scale: %f rotation: %f\n", p.x, p.y, p.hits, p.scale, p.rotation);
             }
         }
     }
@@ -164,16 +169,23 @@ void SeqGeneralHoughTransform::accumulateSource() {
     delete magThreshold;
 }
 
-bool SeqGeneralHoughTransform::localMaxima(std::vector<std::vector<int>> accum, int i, int j, int maximaThres){
-    if (accum[i][j] < maximaThres) return false;
-    int boundRight = (i+1 < accum.size())? i+1 : accum.size()-1;
-    int boundLeft = (i-1 >= 0)? i-1 : 0;
-    int boundTop = (j+1 < accum.size())? j+1 : accum[0].size()-1;
-    int boundBottom = (j-1 >= 0)? j-1 : 0;
+bool SeqGeneralHoughTransform::localMaxima(std::vector<std::vector<Point>> blockMaxima, int i, int j, int maximaThres){
+    if (blockMaxima[i][j].hits < maximaThres) return false;
+    int boundLeft = (i-1 > 0)? i-1 : 0;
+    int boundRight = (i+1 < blockMaxima.size())? i+1 : blockMaxima.size()-1;
+    int boundBottom = (j-1 > 0)? j-1 : 0;
+    int boundTop = (j+1 < blockMaxima[0].size())? j+1 : blockMaxima[0].size()-1;
     for (int ii = boundLeft; ii <= boundRight ; ii++){
         for (int jj = boundBottom; jj <= boundTop; jj++){
             if (ii==i && jj==j) continue;
-            if (accum[ii][jj] >= accum[i][j]) return false;
+            if (blockMaxima[ii][jj].hits >= blockMaxima[i][j].hits){
+                int xc0 = blockMaxima[i][j].x;
+                int yc0 = blockMaxima[i][j].y;
+                int xc1 = blockMaxima[ii][jj].x;
+                int yc1 = blockMaxima[ii][jj].y;
+                if ((abs(xc1 - xc0) < blockSize) || (abs(yc1 - yc0) < blockSize))
+                    return false;
+            } 
         }
     }
     return true;
@@ -243,14 +255,6 @@ void SeqGeneralHoughTransform::threshold(const GrayImage* magnitude, GrayImage* 
         else result->data[i] = 0;
     }
 }
-
-// void SeqGeneralHoughTransform::phiDirection(const GrayImage* orientation, const GrayImage* magThreshold, GrayImage* result) {
-//     result->setGrayImage(orientation->width, orientation->height);
-//     for (int i = 0; i < orientation->width * orientation->height; i++) {
-//         if (magThreshold->data[i] > 0) result->data[i] = orientation->data[i];
-//         else result->data[i] = 0;
-//     }
-// }
 
 void SeqGeneralHoughTransform::createRTable(const GrayImage* orientation, const GrayImage* magThreshold) {
     rTable.clear();

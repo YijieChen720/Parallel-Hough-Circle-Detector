@@ -39,5 +39,5 @@ private:
 
     void createRTable(const GrayImage* orientation, const GrayImage* magnitude);
 
-    bool localMaxima(std::vector<std::vector<int>> accum, int i, int j, int maximaThres);
+    bool localMaxima(std::vector<std::vector<Point>> blockMaxima, int i, int j, int maximaThres);
 };
