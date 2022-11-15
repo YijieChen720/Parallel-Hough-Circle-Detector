@@ -16,6 +16,9 @@ void CudaGeneralHoughTransform::processTemplate() {
 void CudaGeneralHoughTransform::accumulateSource() {
 }
 
+void CudaGeneralHoughTransform::saveOutput() {
+}
+
 bool CudaGeneralHoughTransform::loadTemplate(std::string filename) {
     return false;
 }

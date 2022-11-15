@@ -16,6 +16,8 @@ public:
 
     void accumulateSource() override;
 
+    void saveOutput() override;
+
     bool loadTemplate(std::string filename) override;
 
     bool loadSource(std::string filename) override;
@@ -34,6 +36,8 @@ private:
     void magnitude(const GrayImage* gradientX, const GrayImage* gradientY, GrayImage* result);
 
     void orientation(const GrayImage* gradientX, const GrayImage* gradientY, GrayImage* result);
+
+    void edgenms(const GrayImage* magnitude, const GrayImage* orientation, GrayImage* result);
 
     void threshold(const GrayImage* magnitude, GrayImage* result, int threshold);
 

@@ -10,6 +10,8 @@ public:
 
     virtual void accumulateSource() = 0;
 
+    virtual void saveOutput() = 0;
+
     virtual bool loadTemplate(std::string filename) = 0;
 
     virtual bool loadSource(std::string filename) = 0;

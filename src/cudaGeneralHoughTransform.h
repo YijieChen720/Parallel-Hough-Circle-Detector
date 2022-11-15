@@ -14,6 +14,8 @@ public:
 
     void accumulateSource() override;
 
+    void saveOutput() override;
+
     bool loadTemplate(std::string filename) override;
 
     bool loadSource(std::string filename) override;

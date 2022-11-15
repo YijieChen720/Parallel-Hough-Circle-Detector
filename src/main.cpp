@@ -72,5 +72,6 @@ int main(int argc, char** argv) {
 
     ght->processTemplate();
     ght->accumulateSource();
+    ght->saveOutput();
     delete ght;
 }

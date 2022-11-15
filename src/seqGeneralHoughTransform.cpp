@@ -55,9 +55,14 @@ void SeqGeneralHoughTransform::processTemplate() {
     orientation(gradientX, gradientY, orient);
     // writeGrayPPMImage(orient, "orient.ppm");
 
+    // apply non-maximal supression to supress thick edges
+    GrayImage* magSupressed = new GrayImage;
+    edgenms(mag, orient, magSupressed);
+    // writeGrayPPMImage(magSupressed, "magSupressed.ppm");
+
     // apply a threshold to get a binary image (255 is edge)
     GrayImage* magThreshold = new GrayImage;
-    threshold(mag, magThreshold, THRESHOLD);
+    threshold(magSupressed, magThreshold, THRESHOLD);
     // writeGrayPPMImage(magThreshold, "threshold.ppm");
 
     // update R table using gradient (Phi) and image center
@@ -97,9 +102,13 @@ void SeqGeneralHoughTransform::accumulateSource() {
     GrayImage* orient = new GrayImage;
     orientation(gradientX, gradientY, orient);
 
+    // apply non-maximal supression to supress thick edges 
+    GrayImage* magSupressed = new GrayImage;
+    edgenms(mag, orient, magSupressed);
+
     // apply a threshold to get a binary image (255 is edge)
     GrayImage* magThreshold = new GrayImage;
-    threshold(mag, magThreshold, THRESHOLD);
+    threshold(magSupressed, magThreshold, THRESHOLD);
     // -------Reuse from processTemplate ends-------
 
     // initialize accumulator array (4D: Scale x Rotation x Width x Height)
@@ -124,7 +133,7 @@ void SeqGeneralHoughTransform::accumulateSource() {
                     for (int is = 0; is < nScaleSlices; is++){
                         float s = is*deltaScaleRatio+MINSCALE;
                         for (int itheta = 0; itheta < nRotationSlices; itheta++){
-                            float theta = itheta*deltaRotationAngle/(2*PI);
+                            float theta = itheta*deltaRotationAngle/180.f*PI;
                             int xc = i + round(r*s*cos(alpha+theta));
                             int yc = j + round(r*s*sin(alpha+theta));
                             if (xc>=0 && xc<width && yc>=0 && yc<height){
@@ -191,6 +200,27 @@ bool SeqGeneralHoughTransform::localMaxima(std::vector<std::vector<Point>> block
     return true;
 }
 
+void SeqGeneralHoughTransform::saveOutput() {
+    const int size = 5;
+    for (auto p : hitPoints) {
+        int px = p.x;
+        int py = p.y;
+        for (int i = -size; i <= size; i++) {
+            for (int j = -size; j <= size; j++) {
+                int coloredPx = px + i;
+                int coloredPy = py + j;
+                if (coloredPx >= 0 && coloredPx < src->width && coloredPy >= 0 && coloredPy < src->height) {
+                    int idx = coloredPy * src->width + coloredPx;
+                    src->data[idx * 3] = 255;
+                    src->data[idx * 3 + 1] = 0;
+                    src->data[idx * 3 + 2] = 0;
+                }
+            }
+        }
+    }
+    writePPMImage(src, "output.ppm");
+}
+
 bool SeqGeneralHoughTransform::loadTemplate(std::string filename) {
     if (!readPPMImage(filename, tpl)) return false;
     return true;
@@ -229,7 +259,9 @@ void SeqGeneralHoughTransform::convolve(std::vector<std::vector<int>> filter, co
                     }
                 }
             }
-            result->data[j * source->width + i] = tmp;
+            // do not consider image boundary
+            if (j == 0 || j == source->height - 1 || i == 0 || i == source->width - 1) result->data[j * source->width + i] = 0;
+            else result->data[j * source->width + i] = tmp;
         }
     }
 }
@@ -245,6 +277,55 @@ void SeqGeneralHoughTransform::orientation(const GrayImage* gradientX, const Gra
     result->setGrayImage(gradientX->width, gradientX->height);
     for (int i = 0; i < gradientX->width * gradientX->height; i++) {
         result->data[i] = fmod(atan2(gradientY->data[i], gradientX->data[i]) * 180 / PI + 360, 360);
+    }
+}
+
+bool keepPixel(const GrayImage* magnitude, int i, int j, int gradient) {
+    int neighbourOnei = i;
+    int neighbourOnej = j;
+    int neighbourTwoi = i;
+    int neighbourTwoj = j;
+    
+    switch (gradient) {
+    case 0:
+        neighbourOnei -= 1;
+        neighbourTwoi += 1;
+        break;
+    case 45:
+        neighbourOnej -= 1;
+        neighbourOnei += 1;
+        neighbourTwoj += 1;
+        neighbourTwoi -= 1;
+        break;
+    case 90:
+        neighbourOnej -= 1;
+        neighbourTwoj += 1;
+        break;
+    default: // 135
+        neighbourOnej -= 1;
+        neighbourOnei -= 1;
+        neighbourTwoj += 1;
+        neighbourTwoi += 1;
+    }
+    
+    float neighbourOne = magnitude->data[neighbourOnej * magnitude->width + neighbourOnei];
+    float neighbourTwo = magnitude->data[neighbourTwoj * magnitude->width + neighbourTwoi];
+    float cur = magnitude->data[j * magnitude->width + i];
+    
+    return (neighbourOne <= cur) && (neighbourTwo <= cur);
+}
+
+void SeqGeneralHoughTransform::edgenms(const GrayImage* magnitude, const GrayImage* orientation, GrayImage* result) {
+    result->setGrayImage(orientation->width, orientation->height);
+    for (int j = 0 ; j < orientation->height; j++) {
+        for (int i = 0 ; i < orientation->width; i++) {
+            int pixelGradient = static_cast<int>(orientation->data[j * orientation->width + i] / 45) * 45 % 180;
+            if (keepPixel(magnitude, i, j, pixelGradient)) {
+                result->data[j * orientation->width + i] = magnitude->data[j * orientation->width + i];
+            } else {
+                result->data[j * orientation->width + i] = 0;
+            }
+        }
     }
 }
 
