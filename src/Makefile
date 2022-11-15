@@ -1,8 +1,8 @@
 EXECUTABLE := ght
 LDFLAGS=-L/usr/local/cuda-11.7/lib64/ -lcudart
-CU_FILES   := 
+CU_FILES   := cudaGeneralHoughTransform.cu
 CU_DEPS    :=
-CC_FILES   := main.cpp
+CC_FILES   := main.cpp seqGeneralHoughTransform.cpp utils.cpp
 LOGS	   := 
 
 all: $(EXECUTABLE)
@@ -26,7 +26,8 @@ LDFRAMEWORKS := $(addprefix -framework , $(FRAMEWORKS))
 
 NVCC=nvcc
 
-OBJS=$(OBJDIR)/main.o
+OBJS=$(OBJDIR)/main.o $(OBJDIR)/seqGeneralHoughTransform.o $(OBJDIR)/utils.o \
+     $(OBJDIR)/cudaGeneralHoughTransform.o
 
 
 .PHONY: dirs clean

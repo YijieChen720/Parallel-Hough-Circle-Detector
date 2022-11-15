@@ -10,6 +10,14 @@ public:
 
     virtual ~CudaGeneralHoughTransform();
 
+    void processTemplate() override;
+
+    void accumulateSource() override;
+
+    bool loadTemplate(std::string filename) override;
+
+    bool loadSource(std::string filename) override;
+
 private:
     // void convolve(int **filter, size_t k, const GrayImage* source, GrayImage& result) override;
 };

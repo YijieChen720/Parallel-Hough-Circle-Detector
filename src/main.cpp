@@ -6,7 +6,7 @@
 
 #include "generalHoughTransform.h"
 #include "seqGeneralHoughTransform.h"
-// #include "cudaGeneralHoughTransform.h"
+#include "cudaGeneralHoughTransform.h"
 #include "utils.h"
 
 void usage(const char* progname) {
@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
                 ght = new SeqGeneralHoughTransform();
             } else if (std::string(optarg).compare("cuda") == 0) {
                 printf("Using cuda implementation\n");
-                // ght = new CudaGeneralHoughTransform();
+                ght = new CudaGeneralHoughTransform();
             }
             break;
         case 'h':
