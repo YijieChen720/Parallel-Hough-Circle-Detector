@@ -5,6 +5,7 @@
 struct rEntry {
     int x;
     int y;
+    float r;  // sqrt is expensive, only do it once
     float alpha; // arctan2 is expensive, only do it once
 };
 
