@@ -26,6 +26,10 @@ SeqGeneralHoughTransform::~SeqGeneralHoughTransform() {
     if (src) delete src;
 }
 
+void SeqGeneralHoughTransform::setup() {
+    // do nothing
+}
+
 void SeqGeneralHoughTransform::processTemplate() {
     // convert template to gray image
     GrayImage* grayTpl = new GrayImage;
@@ -200,7 +204,7 @@ void SeqGeneralHoughTransform::saveOutput() {
             }
         }
     }
-    writePPMImage(src, "output.ppm");
+    writePPMImage(src, "output_seq.ppm");
 }
 
 bool SeqGeneralHoughTransform::loadTemplate(std::string filename) {
@@ -262,41 +266,6 @@ void SeqGeneralHoughTransform::orientation(const GrayImage* gradientX, const Gra
     }
 }
 
-bool keepPixel(const GrayImage* magnitude, int i, int j, int gradient) {
-    int neighbourOnei = i;
-    int neighbourOnej = j;
-    int neighbourTwoi = i;
-    int neighbourTwoj = j;
-    
-    switch (gradient) {
-    case 0:
-        neighbourOnei -= 1;
-        neighbourTwoi += 1;
-        break;
-    case 45:
-        neighbourOnej -= 1;
-        neighbourOnei += 1;
-        neighbourTwoj += 1;
-        neighbourTwoi -= 1;
-        break;
-    case 90:
-        neighbourOnej -= 1;
-        neighbourTwoj += 1;
-        break;
-    default: // 135
-        neighbourOnej -= 1;
-        neighbourOnei -= 1;
-        neighbourTwoj += 1;
-        neighbourTwoi += 1;
-    }
-    
-    float neighbourOne = magnitude->data[neighbourOnej * magnitude->width + neighbourOnei];
-    float neighbourTwo = magnitude->data[neighbourTwoj * magnitude->width + neighbourTwoi];
-    float cur = magnitude->data[j * magnitude->width + i];
-    
-    return (neighbourOne <= cur) && (neighbourTwo <= cur);
-}
-
 void SeqGeneralHoughTransform::edgenms(const GrayImage* magnitude, const GrayImage* orientation, GrayImage* result) {
     result->setGrayImage(orientation->width, orientation->height);
     for (int j = 0 ; j < orientation->height; j++) {
@@ -332,10 +301,10 @@ void SeqGeneralHoughTransform::createRTable(const GrayImage* orientation, const 
                 float phi = fmod(orientation->data[j * orientation->width + i], 360); // gradient direction in [0,360)
                 int iSlice = static_cast<int>(phi / deltaRotationAngle);
                 rEntry entry; 
-                entry.x = centerX - i;
-                entry.y = centerY - j;
-                entry.r = sqrt(entry.x * entry.x + entry.y * entry.y);
-                entry.alpha = static_cast<float>(atan2(entry.y, entry.x));
+                auto entryX = centerX - i;
+                auto entryY = centerY - j;
+                entry.r = sqrt(entryX * entryX + entryY * entryY);
+                entry.alpha = static_cast<float>(atan2(entryY, entryX));
                 rTable[iSlice].push_back(entry);
             }
         }

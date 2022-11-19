@@ -12,6 +12,8 @@ public:
 
     ~SeqGeneralHoughTransform();
 
+    void setup() override;
+    
     void processTemplate() override;
 
     void accumulateSource() override;
@@ -42,6 +44,4 @@ private:
     void threshold(const GrayImage* magnitude, GrayImage* result, int threshold);
 
     void createRTable(const GrayImage* orientation, const GrayImage* magnitude);
-
-    bool localMaxima(std::vector<std::vector<Point>> blockMaxima, int i, int j, int maximaThres);
 };

@@ -6,6 +6,8 @@ class GeneralHoughTransform {
 public: 
     virtual ~GeneralHoughTransform(){};
 
+    virtual void setup() = 0;
+
     virtual void processTemplate() = 0;
 
     virtual void accumulateSource() = 0;

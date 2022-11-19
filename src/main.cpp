@@ -70,6 +70,7 @@ int main(int argc, char** argv) {
     }
     std::cout << "***Finished loading images.***\n";
 
+    ght->setup();
     ght->processTemplate();
     ght->accumulateSource();
     ght->saveOutput();

@@ -104,3 +104,38 @@ int getValue(char *line, int &pos) {
         res = res * 10 + (line[pos] - '0');
     return res;
 }
+
+bool keepPixel(const GrayImage* magnitude, int i, int j, int gradient) {
+    int neighbourOnei = i;
+    int neighbourOnej = j;
+    int neighbourTwoi = i;
+    int neighbourTwoj = j;
+    
+    switch (gradient) {
+    case 0:
+        neighbourOnei -= 1;
+        neighbourTwoi += 1;
+        break;
+    case 45:
+        neighbourOnej -= 1;
+        neighbourOnei += 1;
+        neighbourTwoj += 1;
+        neighbourTwoi -= 1;
+        break;
+    case 90:
+        neighbourOnej -= 1;
+        neighbourTwoj += 1;
+        break;
+    default: // 135
+        neighbourOnej -= 1;
+        neighbourOnei -= 1;
+        neighbourTwoj += 1;
+        neighbourTwoi += 1;
+    }
+    
+    float neighbourOne = magnitude->data[neighbourOnej * magnitude->width + neighbourOnei];
+    float neighbourTwo = magnitude->data[neighbourTwoj * magnitude->width + neighbourTwoi];
+    float cur = magnitude->data[j * magnitude->width + i];
+    
+    return (neighbourOne <= cur) && (neighbourTwo <= cur);
+}
