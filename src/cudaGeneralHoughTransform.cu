@@ -4,6 +4,7 @@
 
 #include "cudaGeneralHoughTransform.h"
 #include "utils.h"
+#include "cycleTimer.h"
 
 #include <cuda.h>
 #include <cuda_runtime.h>

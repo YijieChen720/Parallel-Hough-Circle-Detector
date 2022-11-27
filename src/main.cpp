@@ -8,6 +8,7 @@
 #include "seqGeneralHoughTransform.h"
 #include "cudaGeneralHoughTransform.h"
 #include "utils.h"
+#include "cycleTimer.h"
 
 void usage(const char* progname) {
     printf("Usage: %s -t template -s source [options]\n", progname);
@@ -63,6 +64,7 @@ int main(int argc, char** argv) {
     // readPPMImage(templateFilename, templateImage);
     // writePPMImage(templateImage, "test.ppm");
 
+
     std::cout << "***Loading images.***\n";
     if (!ght->loadTemplate(templateFilename) || !ght->loadSource(sourceFilename)) {
         std::cerr << "***Failed to load images.***\n";
@@ -71,8 +73,28 @@ int main(int argc, char** argv) {
     std::cout << "***Finished loading images.***\n";
 
     ght->setup();
+
+    double startTime = CycleTimer::currentSeconds();
+    
+    double startTemplateTime = CycleTimer::currentSeconds();
     ght->processTemplate();
+    double endTemplateTime = CycleTimer::currentSeconds();
+    
+    double startSourceTime = CycleTimer::currentSeconds();
     ght->accumulateSource();
+    double endSourceTime = CycleTimer::currentSeconds();
+    
+    double endTime = CycleTimer::currentSeconds();
+    
     ght->saveOutput();
+
     delete ght;
+
+    double totalTime = endTime - startTime;
+    double totalTemplateTime = endTemplateTime - startTemplateTime;
+    double totalSourceTime = endSourceTime - startSourceTime;
+
+    printf("Process Template:  %.4f ms\n", 1000.f * totalTemplateTime);
+    printf("Process Source:    %.4f ms\n", 1000.f * totalSourceTime);
+    printf("Overall:           %.4f ms\n", 1000.f * totalTime);
 }
