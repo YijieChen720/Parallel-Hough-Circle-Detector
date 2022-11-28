@@ -26,14 +26,6 @@ const int nScaleSlices = (MAXSCALE - MINSCALE) / deltaScaleRatio + 1;
 const int blockSize = 10;
 const float thresRatio = 0.9;
 
-struct GlobalConstants {
-    int width;
-    int height;
-}
-
-__constant__ GlobalConstants cuTemplateParams;
-__constant__ GlobalConstants cuSourceParams;
-
 CudaGeneralHoughTransform::CudaGeneralHoughTransform() {
     tpl = new Image;
     src = new Image;
@@ -104,7 +96,7 @@ struct compare_pixel_by_orient
     }
 };
 
-__global__ void accumulate_kernel_naive(int* accumulator, float* edgePixels, int numEdgePixels, float* srcOrient) {
+__global__ void accumulate_kernel_naive(int* accumulator, float* edgePixels, int numEdgePixels, float* srcOrient, int width, int height, int wblock, int hblock) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= numEdgePixels) return;
 
@@ -126,10 +118,10 @@ __global__ void accumulate_kernel_naive(int* accumulator, float* edgePixels, int
                 float s = is * deltaScaleRatio + MINSCALE;
                 int xc = i + round(r * s * cos(alpha + theta_r));
                 int yc = j + round(r * s * sin(alpha + theta_r));
-                if (xc >= 0 && xc < cuSourceParams.width && yc >= 0 && yc < cuSourceParams.height) {
-                    int accumulatorIndex = is * nRotationSlices * (cuSourceParams.height / blockSize + 1) * (cuSourceParams.width / blockSize + 1) 
-                                           + itheta * (cuSourceParams.height / blockSize + 1) * (cuSourceParams.width / blockSize + 1)
-                                           + yc / blockSize * (cuSourceParams.width / blockSize + 1)
+                if (xc >= 0 && xc < width && yc >= 0 && yc < height) {
+                    int accumulatorIndex = is * nRotationSlices * hblock * wblock
+                                           + itheta * hblock * wblock
+                                           + yc / blockSize * wblock
                                            + xc / blockSize;
                     atomicAdd(accumulator + accumulatorIndex, 1);
                 }
@@ -190,7 +182,7 @@ __global__ void fillIntervals_kernel(int* startIndex, int numEdgePixels, int thr
     }
 }
 
-__global__ void accumulate_kernel_better(int* accumulator, float* edgePixels, float* srcOrient, int* blockStarts, int* blockEnds) {
+__global__ void accumulate_kernel_better(int* accumulator, float* edgePixels, float* srcOrient, int* blockStarts, int* blockEnds, int width, int height, int wblock, int hblock) {
     int blockIndex = blockIdx.x;
     int start = blockStarts[blockIdx];
     int end = blockEnds[blockIdx];
@@ -217,10 +209,10 @@ __global__ void accumulate_kernel_better(int* accumulator, float* edgePixels, fl
                 float s = is * deltaScaleRatio + MINSCALE;
                 int xc = i + round(r * s * cos(alpha + theta_r));
                 int yc = j + round(r * s * sin(alpha + theta_r));
-                if (xc >= 0 && xc < cuSourceParams.width && yc >= 0 && yc < cuSourceParams.height) {
-                    int accumulatorIndex = is * nRotationSlices * (cuSourceParams.height / blockSize + 1) * (cuSourceParams.width / blockSize + 1) 
-                                           + itheta * (cuSourceParams.height / blockSize + 1) * (cuSourceParams.width / blockSize + 1)
-                                           + yc / blockSize * (cuSourceParams.width / blockSize + 1)
+                if (xc >= 0 && xc < width && yc >= 0 && yc < height) {
+                    int accumulatorIndex = is * nRotationSlices * hblock * wblock
+                                           + itheta * hblock * wblock
+                                           + yc / blockSize * wblock
                                            + xc / blockSize;
                     atomicAdd(accumulator + accumulatorIndex, 1);
                 }
@@ -229,7 +221,7 @@ __global__ void accumulate_kernel_better(int* accumulator, float* edgePixels, fl
     }
 }
 
-__global__ void accumulate_kernel_3D(int* accumulator, float* edgePixels, float* srcOrient, int* blockStarts, int* blockEnds) {
+__global__ void accumulate_kernel_3D(int* accumulator, float* edgePixels, float* srcOrient, int* blockStarts, int* blockEnds, int width, int height, int wblock, int hblock) {
     int blockIndex = blockIdx.x;
     int start = blockStarts[blockIdx];
     int end = blockEnds[blockIdx];
@@ -258,17 +250,17 @@ __global__ void accumulate_kernel_3D(int* accumulator, float* edgePixels, float*
         float alpha = entry.alpha;
         int xc = i + round(r * s * cos(alpha + theta_r));
         int yc = j + round(r * s * sin(alpha + theta_r));
-        if (xc >= 0 && xc < cuSourceParams.width && yc >= 0 && yc < cuSourceParams.height) {
-            int accumulatorIndex = is * nRotationSlices * (cuSourceParams.height / blockSize + 1) * (cuSourceParams.width / blockSize + 1) 
-                                   + itheta * (cuSourceParams.height / blockSize + 1) * (cuSourceParams.width / blockSize + 1)
-                                   + yc / blockSize * (cuSourceParams.width / blockSize + 1)
+        if (xc >= 0 && xc < width && yc >= 0 && yc < height) {
+            int accumulatorIndex = is * nRotationSlices * hblock * wblock
+                                   + itheta * hblock * wblock
+                                   + yc / blockSize * wblock
                                    + xc / blockSize;
             atomicAdd(accumulator + accumulatorIndex, 1);
         }
     }
 }
 
-__global__ void accumulate_kernel_3D_sharedMemory(int* accumulator, float* edgePixels, float* srcOrient, int* blockStarts, int* blockEnds) {
+__global__ void accumulate_kernel_3D_sharedMemory(int* accumulator, float* edgePixels, float* srcOrient, int* blockStarts, int* blockEnds, int width, int height, int wblock, int hblock) {
     int blockIndex = blockIdx.x;
     int start = blockStarts[blockIdx];
     int end = blockEnds[blockIdx];
@@ -290,7 +282,7 @@ __global__ void accumulate_kernel_3D_sharedMemory(int* accumulator, float* edgeP
     
     float s = is * deltaScaleRatio + MINSCALE;
 
-    __shared__ int accumulatorSlice[(cuSourceParams.height / blockSize + 1) * (cuSourceParams.width / blockSize + 1)];
+    __shared__ int accumulatorSlice[hblock * wblock];
     
     // access RTable and traverse all entries
     // std::vector<rEntry> entries = rTable[iSlice];
@@ -299,44 +291,44 @@ __global__ void accumulate_kernel_3D_sharedMemory(int* accumulator, float* edgeP
         float alpha = entry.alpha;
         int xc = i + round(r * s * cos(alpha + theta_r));
         int yc = j + round(r * s * sin(alpha + theta_r));
-        if (xc >= 0 && xc < cuSourceParams.width && yc >= 0 && yc < cuSourceParams.height) {
-            // int accumulatorIndex = is * nRotationSlices * (cuSourceParams.height / blockSize + 1) * (cuSourceParams.width / blockSize + 1) 
-            //                        + itheta * (cuSourceParams.height / blockSize + 1) * (cuSourceParams.width / blockSize + 1)
-            //                        + yc / blockSize * (cuSourceParams.width / blockSize + 1)
+        if (xc >= 0 && xc < width && yc >= 0 && yc < height) {
+            // int accumulatorIndex = is * nRotationSlices * hblock * wblock
+            //                        + itheta * hblock * wblock
+            //                        + yc / blockSize * wblock
             //                        + xc / blockSize;
             // atomicAdd(accumulator + accumulatorIndex, 1);
-            int accumulatorSliceIndex = yc / blockSize * (cuSourceParams.width / blockSize + 1) + xc / blockSize;
+            int accumulatorSliceIndex = yc / blockSize * wblock + xc / blockSize;
             atomicAdd(accumulatorSlice + accumulatorSliceIndex , 1);
         }
     }
 
     __syncthreads();
     if (threadIdx.x == 0) {
-        for (int j = 0; j < (cuSourceParams.height / blockSize + 1); j++) {
-            for (int i = 0; i < (cuSourceParams.width / blockSize + 1); i++) {
-                int accumulatorIndex = is * nRotationSlices * (cuSourceParams.height / blockSize + 1) * (cuSourceParams.width / blockSize + 1) 
-                                       + itheta * (cuSourceParams.height / blockSize + 1) * (cuSourceParams.width / blockSize + 1)
-                                       + j * (cuSourceParams.width / blockSize + 1)
+        for (int j = 0; j < hblock; j++) {
+            for (int i = 0; i < wblock; i++) {
+                int accumulatorIndex = is * nRotationSlices * hblock * wblock
+                                       + itheta * hblock * wblock
+                                       + j * wblock
                                        + i;
-                int accumulatorSliceIndex = j * (cuSourceParams.width / blockSize + 1) + i;
+                int accumulatorSliceIndex = j * wblock + i;
                 accumulator[accumulatorIndex] += accumulatorSlice[accumulatorSliceIndex];
             }
         }
     }
 }
 
-__global__ void findmaxima_kernel(int* accumulator, Point* blockMaxima) {
+__global__ void findmaxima_kernel(int* accumulator, Point* blockMaxima, int wblock, int hblock) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int row = index / (cuSourceParams.width / blockSize + 1);
-    int col = index % (cuSourceParams.width / blockSize + 1);
+    int row = index / wblock;
+    int col = index % wblock;
 
     int max = -1;
     blockMaxima[index].hits = 0;
     for (int itheta = 0; itheta < nRotationSlices; itheta++) {
         for (int is = 0; is < nScaleSlices; is++) {
-            int accumulatorIndex = is * nRotationSlices * (cuSourceParams.height / blockSize + 1) * (cuSourceParams.width / blockSize + 1) 
-                                   + itheta * (cuSourceParams.height / blockSize + 1) * (cuSourceParams.width / blockSize + 1)
-                                   + row * (cuSourceParams.width / blockSize + 1)
+            int accumulatorIndex = is * nRotationSlices * hblock * wblock
+                                   + itheta * hblock * wblock
+                                   + row * wblock
                                    + col;
             if (accumulator[accumulatorIndex] > max) {
                 max = accumulator[accumulatorIndex];
@@ -351,7 +343,10 @@ __global__ void findmaxima_kernel(int* accumulator, Point* blockMaxima) {
 }
 
 // srcThreshold, srcOrient: pointers to GPU memory address
-void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient) {
+void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient, int width, int height) {
+    int wblock = (width + blockSize - 1) / blockSize;
+    int hblock = (height + blockSize - 1) / blockSize;
+    
     // Access using the following pattern:
     // sizeof(accumulator) = arbitrary * sizez * sizey * sizex
     // accumulator[l][k][j][i] = accumulator1D[l*(sizex*sizey*sizez) + k*(sizex*sizey) + j*(sizex) + i]
@@ -359,19 +354,19 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
     Point* blockMaxima;
     Point* hitPointsCuda;
 
-    int sizeAccumulator = nScaleSlices * nRotationSlices * (src->height / blockSize + 1) * (src->width / blockSize + 1);
+    int sizeAccumulator = nScaleSlices * nRotationSlices * hblock * wblock;
     cudaMalloc(&accumulator, sizeof(int) * sizeAccumulator);
     cudaMemset(accumulator, 0.f, sizeof(int) * sizeAccumulator);
-    cudaMalloc(&blockMaxima, sizeof(Point) * (src->height / blockSize + 1) * (src->width / blockSize + 1));
+    cudaMalloc(&blockMaxima, sizeof(Point) * hblock * wblock);
 
     // Get all edge pixels
     // TODO: magThreshold put index instead of 255 at each element, -1 if not an edge pixel
     float* edgePixels; // expected data example: [1.0, 3.0, 7.0, ...] (float as it is copied from srcThreshold)
-    cudaMalloc(&edgePixels, sizeof(float) * src->height * src->width);
-    cudaMemset(edgePixels, 0.f, sizeof(int) * src->height * src->width);
+    cudaMalloc(&edgePixels, sizeof(float) * height * width);
+    cudaMemset(edgePixels, 0.f, sizeof(int) * height * width);
     thrust::device_ptr<float> srcThresholdThrust = thrust::device_pointer_cast(srcThreshold); 
     thrust::device_ptr<float> edgePixelsThrust = thrust::device_pointer_cast(edgePixels); 
-    int numEdgePixels = thrust::copy_if(srcThresholdThrust, srcThresholdThrust + src->width * src->height, edgePixelsThrust, is_edge()) - edgePixelsThrust;
+    int numEdgePixels = thrust::copy_if(srcThresholdThrust, srcThresholdThrust + width * height, edgePixelsThrust, is_edge()) - edgePixelsThrust;
     
     // --------------------------------------------------------------------
     // (1) naive approach: 1D partition -> divergent control flow on entries
@@ -380,7 +375,7 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
     // Write to global CUDA memory atomically
     int threadsPerBlock = 32;
     int blocks = (numEdgePixels + threadsPerBlock - 1) / threadsPerBlock;
-    accumulate_kernel_naive<<<blocks, threadsPerBlock>>>(accumulator, edgePixels, numEdgePixels, srcOrient);
+    accumulate_kernel_naive<<<blocks, threadsPerBlock>>>(accumulator, edgePixels, numEdgePixels, srcOrient, width, height, wblock, hblock);
     cudaDeviceSynchronize();
     // --------------------------------------------------------------------
 
@@ -417,18 +412,18 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
     fillIntervals_kernel<<<1, 1>>>(startIndex, numEdgePixels, threadsPerBlock, blockStarts, blockEnds);
     cudaDeviceSynchronize();
 
-    accumulate_kernel_better<<<numBlocks, threadsPerBlock>>>(accumulator, edgePixels, srcOrient, blockStarts, blockEnds);
+    accumulate_kernel_better<<<numBlocks, threadsPerBlock>>>(accumulator, edgePixels, srcOrient, blockStarts, blockEnds, width, height, wblock, hblock);
     cudaDeviceSynchronize();
 
     // (3) more parallelism: 
     //     a. put edge points into buckets by phi
     //     b. go by same phi, then same theta (2D) -> shared slice of 3D accumulator || then same scale (3D?) -> shared slice of 2D accumulator
     dim3 gridDim(numBlocks, nRotationSlices, nScaleSlices);
-    accumulate_kernel_3D<<<gridDim, threadsPerBlock>>>(accumulator, edgePixels, srcOrient, blockStarts, blockEnds);
+    accumulate_kernel_3D<<<gridDim, threadsPerBlock>>>(accumulator, edgePixels, srcOrient, blockStarts, blockEnds, width, height, wblock, hblock);
     cudaDeviceSynchronize();
 
     // shared memory of accumulator slice
-    accumulate_kernel_3D_sharedMemory<<<gridDim, threadsPerBlock>>>(accumulator, edgePixels, srcOrient, blockStarts, blockEnds);
+    accumulate_kernel_3D_sharedMemory<<<gridDim, threadsPerBlock>>>(accumulator, edgePixels, srcOrient, blockStarts, blockEnds, width, height, wblock, hblock);
     cudaDeviceSynchronize();
 
     cudaFree(startIndex);
@@ -441,19 +436,19 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
     // b. any idea to reduce global memory access?
 
     // Use a seperate kernel to fill in the blockMaxima array (avoid extra memory read)
-    blocks = ((src->height / blockSize + 1) * (src->width / blockSize + 1) + threadsPerBlock - 1) / threadsPerBlock;
-    findmaxima_kernel<<<blocks, threadsPerBlock>>>(accumulator, blockMaxima);
+    blocks = (hblock * wblock + threadsPerBlock - 1) / threadsPerBlock;
+    findmaxima_kernel<<<blocks, threadsPerBlock>>>(accumulator, blockMaxima, wblock, hblock);
     cudaDeviceSynchronize();
 
     // use thrust::max_element to get the max hit from blockMaxima
     thrust::device_ptr<Point> blockMaximaThrust = thrust::device_pointer_cast(blockMaxima);
-    Point maxPoint = *(thrust::max_element(blockMaximaThrust, blockMaximaThrust + (src->height / blockSize + 1) * (src->width / blockSize + 1), compare_point()));
+    Point maxPoint = *(thrust::max_element(blockMaximaThrust, blockMaximaThrust + hblock * wblock, compare_point()));
     int maxHit = maxPoint.hits;
 
     // use thrust::copy_if to get the above threshold points & number
     cudaMalloc(hitPointsCuda, sizeof(Point) * numEdgePixels);
     thrust::device_ptr<Point> hitPointsThrust = thrust::device_pointer_cast(hitPointsCuda);
-    int numResPoints = thrust::copy_if(blockMaximaThrust, blockMaximaThrust + (src->height / blockSize + 1) * (src->width / blockSize + 1), hitPointsThrust, filter_point(round(maxHit * thresRatio))) - blockMaximaThrust;
+    int numResPoints = thrust::copy_if(blockMaximaThrust, blockMaximaThrust + hblock * wblock, hitPointsThrust, filter_point(round(maxHit * thresRatio))) - blockMaximaThrust;
 
     // Copy back to cpu memory
     hitPoints.clear();
