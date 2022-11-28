@@ -9,16 +9,29 @@
 #include <cuda_runtime.h>
 #include <driver_functions.h>
 
-const int THRESHOLD = 200;
-const float PI = 3.14159265;
-const int nRotationSlices = 72;
-const float deltaRotationAngle = 360 / nRotationSlices;
-const float MAXSCALE = 1.4f;
-const float MINSCALE = 0.6f;
-const float deltaScaleRatio = 0.1f;
-const int nScaleSlices = (MAXSCALE - MINSCALE) / deltaScaleRatio + 1;
-const int blockSize = 10;
-const float thresRatio = 0.9;
+#include <thrust/device_ptr.h>
+#include <thrust/copy.h>
+#include <thrust/extrema.h>
+#include <thrust/sort.h>
+
+#define TPB_X 32
+#define TPB_Y 32
+#define TPB (TPB_X*TPB_Y)
+
+struct GlobalConstants {
+    int THRESHOLD;
+    float PI;
+    int nRotationSlices;
+    float deltaRotationAngle;
+    float MAXSCALE;
+    float MINSCALE;
+    float deltaScaleRatio;
+    int nScaleSlices;
+    int blockSize;
+    float thresRatio;
+};
+
+__constant__ GlobalConstants cuConstParams;
 
 CudaGeneralHoughTransform::CudaGeneralHoughTransform() {
     tpl = new Image;
@@ -47,6 +60,127 @@ void CudaGeneralHoughTransform::setup() {
         printf("   CUDA Cap:   %d.%d\n", deviceProps.major, deviceProps.minor);
     }
     printf("---------------------------------------------------------\n");
+
+    // cudaMalloc(&cudaDeviceTpl, sizeof(Image));
+    // cudaMalloc(&cudaDeviceSrc, sizeof(Image));
+
+    // cudaMemcpy(cudaDeviceTpl, tpl, sizeof(Image), cudaMemcpyHostToDevice);
+    // cudaMemcpy(cudaDeviceSrc, src, sizeof(Image), cudaMemcpyHostToDevice);
+
+    GlobalConstants params;
+    params.THRESHOLD = 200;
+    params.PI = 3.14159265;
+    params.nRotationSlices = 72;
+    params.deltaRotationAngle = 360 / nRotationSlices;
+    params.MAXSCALE = 1.4f;
+    params.MINSCALE = 0.6f;
+    params.deltaScaleRatio = 0.1f;
+    params.nScaleSlices = (MAXSCALE - MINSCALE) / deltaScaleRatio + 1;
+    params.blockSize = 10;
+    params.thresRatio = 0.9;
+
+    cudaMemcpyToSymbol(cuConstParams, &params, sizeof(GlobalConstants));
+
+}
+
+__global__ void kernelConvertToGray(int width, int height){
+    int indexX = blockIdx.x * blockDim.x + threadIdx.x;
+    int indexY = blockIdx.y * blockDim.y + threadIdx.y;
+    int index = indexY * blockDim.x * TPB_X + indexX;
+
+    if (indexX >= width || indexY >= height) return;
+    deviceData[index] = (deviceData[3 * index] + deviceData[3 * index + 1] +deviceData[3 * index + 2]) / 3.f;
+}
+
+// parallel convolveX, convolveY
+// parallel magnitude, orientaion
+// __global__ void kernelProcessStep1Updated(int width, int height){
+//     int indexX = blockIdx.x * blockDim.x + threadIdx.x;
+//     int indexY = blockIdx.y * blockDim.y + threadIdx.y;
+//     int index = (indexY * blockDim.x * TPB_X + indexX)/2;
+//     indexX = index % width;
+//     indexY = index / width;
+//     int localIdx = threadIdx.y * TPB_X + threadIdx.x;
+
+//     if (indexX >= width || indexY >= height) return;
+
+//     __shared__ float gradientX[TPB/2];
+//     __shared__ float gradientY[TPB/2];
+//     int sobel[3][3] = {{1, 0, -1}, {2, 0, -2}, {1, 0, -1}};
+//     if (localIdx%2==0){
+//         convolve(sobel, deviceData, gradientX, width, height, indexX, indexY);
+//     }
+//     else{
+//         convolve(sobel, deviceData, gradientY, width, height, indexX, indexY);
+//     }
+//     __syncthreads();
+
+//     if (localIdx%2==0){
+//         magnitude(gradientX, gradientY, deviceData, index, localIdx/2);
+//     }
+//     else{
+//         orientation(gradientX, gradientY, orient, index, localIdx/2);
+//     }
+// }
+
+
+__global__ void kernelProcessStep1(int width, int height){
+    int indexX = blockIdx.x * blockDim.x + threadIdx.x;
+    int indexY = blockIdx.y * blockDim.y + threadIdx.y;
+    int index = indexY * blockDim.x * TPB_X + indexX;
+    int localIdx = threadIdx.y*TPB_X+threadIdx.x;
+
+    if (indexX >= width || indexY >= height) return;
+
+    __shared__ float gradientX[TPB];
+    __shared__ float gradientY[TPB];
+    int sobel[3][3] = {{1, 0, -1}, {2, 0, -2}, {1, 0, -1}};
+    convolve(sobel, deviceData, gradientX, width, height, indexX, indexY);
+    convolve(sobel, deviceData, gradientY, width, height, indexX, indexY);
+
+    magnitude(gradientX, gradientY, deviceData, index, localIdx);
+    orientation(gradientX, gradientY, orient, index, localIdx);
+}
+
+__global__ void kernelProcessStep2(int width, int height, bool tpl){
+    int indexX = blockIdx.x * blockDim.x + threadIdx.x;
+    int indexY = blockIdx.y * blockDim.y + threadIdx.y;
+    int index = indexY * blockDim.x * TPB_X + indexX;
+    int localIdx = threadIdx.y * TPB_X + threadIdx.x;
+
+    if (indexX >= width || indexY >= height) return;
+
+    // __shared__ float result[TPB];
+    __shared__ float magnitude[TPB]; 
+    __shared__ float orient[TPB]; 
+    // load this block's magnitude and orient value in shared memory, 
+    // decreasing the global memory access
+    magnitude[localIdx] = deviceData[index]; 
+    orient[localIdx] = orient[index]; 
+    
+    edgenms(magnitude, orient, magnitude, width, height, indexX, indexY, localIdx); 
+    threshold(magnitude, magnitude, cuConstParam.THRESHOLD, index, localIdx);
+
+    // if processing template, only need to create R table
+    if (tpl){
+        createRTable(orient, magnitude, width, height, index);
+    }
+    // if processing source, write the result data back to global memory
+    else{
+        deviceData[index] = magnitude[localIdx];
+    }
+}
+
+__global__ void processRTable(int width, int height){
+    int i = 0;
+    int angle = cuConstParam.deltaRotationAngle;
+    while(i < width * height){
+        if (entries[i] < 0) continue;
+        while (i!=0 || entries[i] == entries[i-1]) {i++};
+        for (j = entries[i-1]/angle+1; j < entries[i]/angle+1; j+=angle){
+            startPos[j] = i;
+        }
+    }    
 }
 
 // 1. no need to allocate each image in cpu
@@ -54,168 +188,72 @@ void CudaGeneralHoughTransform::setup() {
 // 3. parallel convolveX, convolveY
 // 4. parallel magnitude & orientation
 void CudaGeneralHoughTransform::processTemplate() {
-    // convert template to gray image
-    GrayImage* grayTpl = new GrayImage;
-    convertToGray(tpl, grayTpl);
+    float* deviceData;
+    float* orient;
+    rEntry* entries;
 
-    // apply sobel_x -> gradient in x
-    std::vector<std::vector<int>> sobelX = {{1, 0, -1}, {2, 0, -2}, {1, 0, -1}};
-    GrayImage* gradientX = new GrayImage;
-    convolve(sobelX, grayTpl, gradientX);
+    cudaMalloc(&deviceData, tpl->width * tpl->height * sizeof(float));
+    cudaMemcpy(deviceData, tpl->data, tpl->width * tpl->height * sizeof(float), cudaMemcpyHostToDevice);
 
-    // apply soble_y -> gradient in y
-    std::vector<std::vector<int>> sobelY = {{1, 2, 1}, {0, 0, 0}, {-1, -2, -1}};
-    GrayImage* gradientY = new GrayImage;
-    convolve(sobelY, grayTpl, gradientY);
-
-    // grascale magnitude = sqrt(square(x) + square(y))
-    GrayImage* mag = new GrayImage;
-    magnitude(gradientX, gradientY, mag);
-
-    // grascale orientation = (np.degrees(np.arctan2(image_y,image_x))+360)%360
-    // orientation in [0, 360)
-    GrayImage* orient = new GrayImage;
-    orientation(gradientX, gradientY, orient);
-
-    // apply non-maximal supression to supress thick edges
-    GrayImage* magSupressed = new GrayImage;
-    edgenms(mag, orient, magSupressed);
-
-    // apply a threshold to get a binary image (255 is edge)
-    GrayImage* magThreshold = new GrayImage;
-    threshold(magSupressed, magThreshold, THRESHOLD);
-
-    // update R table using gradient (Phi) and image center
-    // also update centerX and centerY
-    createRTable(orient, magThreshold);
+    cudaMalloc(&entries, tpl->width * tpl->height * sizeof(rEntry));
     
+    cudaMalloc(&orient, tpl->width * tpl->height * sizeof(float));
+
+    dim3 blockDim(TPB_X, TPB_Y, 1);
+    dim3 gridDim((tpl->width + TPB_X - 1) / TPB_X, 
+                 (tpl->height + TPB_Y - 1) / TPB_Y, 1);
+    
+    kernelConvertToGray<<<gridDim, blockDim>>>(tpl->width, tpl->height);
+    cudaDeviceSynchronize();
+
+    kernelProcessStep1<<<gridDim, blockDim>>>(tpl->width, tpl->height);
+    cudaDeviceSynchronize();
+
+    kernelProcessStep2<<<gridDim, blockDim>>>(tpl->width, tpl->height, true);
+    cudaDeviceSynchronize();  
+
+    thrust::device_ptr<rEntry> entriesThrust = thrust::device_pointer_cast(entriesThrust); 
+    
+    thrust::sort(entriesThrust, entriesThrust + tpl->width * tpl->height, compare_entry_by_rotation(entries));
+
+    int* startPos;
+    cudaMalloc(&startPos, params.nRotationSlices * sizeof(int));
+    
+
     // memory deallocation
-    delete grayTpl;
-    delete gradientX;
-    delete gradientY;
-    delete mag;
-    delete orient;
-    delete magThreshold;
+    cudaFree(entries);
+    cudaFree(deviceData);
+    cudaFree(orient);
 }
 
 void CudaGeneralHoughTransform::accumulateSource() {
-    // -------Reuse from processTemplate-------
-    // convert source to gray image
-    GrayImage* graySrc = new GrayImage;
-    convertToGray(src, graySrc);
+    float* deviceData;
+    float* orient;
 
-    // apply sobel_x -> grayscale image x
-    std::vector<std::vector<int>> sobelX = {{1, 0, -1}, {2, 0, -2}, {1, 0, -1}};
-    GrayImage* gradientX = new GrayImage;
-    convolve(sobelX, graySrc, gradientX);
+    cudaMalloc(&deviceData, src->width * src->height * sizeof(float));
+    cudaMemcpy(deviceData, src->data, src->width * src->height * sizeof(float), cudaMemcpyHostToDevice);
 
-    // apply soble_y -> grayscale image y
-    std::vector<std::vector<int>> sobelY = {{1, 2, 1}, {0, 0, 0}, {-1, -2, -1}};
-    GrayImage* gradientY = new GrayImage;
-    convolve(sobelY, graySrc, gradientY);
+    cudaMalloc(&orient, src->width * src->height * sizeof(float));
 
-    // grascale magnitude = sqrt(square(x) + square(y))
-    GrayImage* mag = new GrayImage;
-    magnitude(gradientX, gradientY, mag);
+    dim3 blockDim(TPB_X, TPB_Y, 1);
+    dim3 gridDim((src->width + TPB_X - 1) / TPB_X, 
+                 (src->height + TPB_Y - 1) / TPB_Y, 1);
+    
+    kernelConvertToGray<<<gridDim, blockDim>>>(src->width, src->height);
+    cudaDeviceSynchronize();
 
-    // grascale gradient = (np.degrees(np.arctan2(image_y,image_x))+360)%360
-    GrayImage* orient = new GrayImage;
-    orientation(gradientX, gradientY, orient);
+    kernelProcessStep1<<<gridDim, blockDim>>>(src->width, src->height);
+    cudaDeviceSynchronize();
 
-    // apply non-maximal supression to supress thick edges 
-    GrayImage* magSupressed = new GrayImage;
-    edgenms(mag, orient, magSupressed);
+    kernelProcessStep2<<<gridDim, blockDim>>>(src->width, src->height, false);
+    cudaDeviceSynchronize();  
 
-    // apply a threshold to get a binary image (255 is edge)
     GrayImage* magThreshold = new GrayImage;
-    threshold(magSupressed, magThreshold, THRESHOLD);
-    // -------Reuse from processTemplate ends-------
-
-    // initialize accumulator array (4D: Scale x Rotation x Width x Height)
-    int width = magThreshold->width;
-    int height = magThreshold->height;
-    std::vector<std::vector<std::vector<std::vector<int>>>> accumulator(nScaleSlices, std::vector<std::vector<std::vector<int>>>(nRotationSlices, std::vector<std::vector<int>>(width/blockSize+1, std::vector<int>(height/blockSize+1, 0))));
-    std::vector<std::vector<Point>> blockMaxima(width/blockSize+1, std::vector<Point>(height/blockSize+1, (struct Point){0, 0, 0, 0.f, 0.f}));
-
-    // Each edge pixel vote
-    printf("------Start calculating accumulator-------\n");
-    // int _max = 0;
-    // for (int j = 0 ; j < height; j++) {
-    //     for (int i = 0 ; i < width; i++) {
-    //         if (magThreshold->data[j * width + i] > 254) {
-    //             // calculate edge gradient
-    //             float phi = orient->data[j * width + i]; // gradient direction in [0,360)
-    //             for (int itheta = 0; itheta < nRotationSlices; itheta++){
-    //                 float theta = itheta * deltaRotationAngle;
-    //                 float theta_r = theta / 180.f * PI;
-
-    //                 // minus mean rotate back by theta
-    //                 int iSlice = static_cast<int>(fmod(phi - theta + 360, 360) / deltaRotationAngle);
-    //                 std::vector<rEntry> entries = rTable[iSlice];
-    //                 for (auto entry: entries){
-    //                     float r = entry.r;
-    //                     float alpha = entry.alpha;
-    //                     for (int is = 0; is < nScaleSlices; is++){
-    //                         float s = is * deltaScaleRatio + MINSCALE;
-    //                         int xc = i + round(r * s * cos(alpha + theta_r));
-    //                         int yc = j + round(r * s * sin(alpha + theta_r));
-    //                         if (xc >= 0 && xc < width && yc >= 0 && yc < height){
-    //                             // use block here? too fine grained for pixel level
-    //                             accumulator[is][itheta][xc/blockSize][yc/blockSize]++;
-    //                             // find maximum for each block
-    //                             if (accumulator[is][itheta][xc/blockSize][yc/blockSize] > blockMaxima[xc/blockSize][yc/blockSize].hits){
-    //                                 blockMaxima[xc/blockSize][yc/blockSize].hits = accumulator[is][itheta][xc/blockSize][yc/blockSize];
-    //                                 blockMaxima[xc/blockSize][yc/blockSize].x = xc/blockSize * blockSize + blockSize / 2;
-    //                                 blockMaxima[xc/blockSize][yc/blockSize].y = yc/blockSize * blockSize + blockSize / 2;
-    //                                 blockMaxima[xc/blockSize][yc/blockSize].scale = s;
-    //                                 blockMaxima[xc/blockSize][yc/blockSize].rotation = theta;
-    //                                 _max = (blockMaxima[xc/blockSize][yc/blockSize].hits > _max)? blockMaxima[xc/blockSize][yc/blockSize].hits: _max;
-    //                             }
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-    printf("max value in accumulator: %d\n", _max);
-    printf("------End calculating accumulator-------\n");
-
-    // find local maxima
-    // int maximaThres = round(_max * thresRatio);
-    // for (int i = 0; i <= width/blockSize ; i++){
-    //     for (int j = 0; j <= height/blockSize; j++){
-    //         if (blockMaxima[i][j].hits > maximaThres) {
-    //             Point p = (struct Point){blockMaxima[i][j].x, blockMaxima[i][j].y, blockMaxima[i][j].hits, blockMaxima[i][j].scale, blockMaxima[i][j].rotation};
-    //             hitPoints.push_back(p);
-    //             printf("hit points: %d %d hits: %d scale: %f rotation: %f\n", p.x, p.y, p.hits, p.scale, p.rotation);
-    //         }
-    //     }
-    // }
-
-    // find all edge points, put into a vector
-
-    // (1) naive approach: 1D partition -> divergent control flow on entries
-
-    // (2) better approach: 
-    //     a. put edge points into buckets by phi
-    //     b. points with the same phi go together in a kernel (1D) each block has the same phi value
-
-    // (3) more parallelism: 
-    //     a. put edge points into buckets by phi
-    //     b. go by same phi, then same theta (2D) -> shared slice of 3D accumulator || then same scale (3D?) -> shared slice of 2D accumulator
-
-    // Some high level notes: 
-    // a. use atomic add when update accumulator
-    // b. any idea to reduce global memory access?
+    cudaMemcpy(magThreshold->data, deviceData, src->width * src->height * sizeof(float), cudaMemcpyDeviceToHost);
 
     // memory deallocation
-    delete graySrc;
-    delete gradientX;
-    delete gradientY;
-    delete mag;
-    delete orient;
-    delete magThreshold;
+    cudaFree(deviceData);
+    cudaFree(orient);
 }
 
 void CudaGeneralHoughTransform::saveOutput() {
@@ -249,96 +287,125 @@ bool CudaGeneralHoughTransform::loadSource(std::string filename) {
     return true;
 }
 
-void CudaGeneralHoughTransform::convertToGray(const Image* image, GrayImage* result) {
-    result->setGrayImage(image->width, image->height);
-    for (int i = 0; i < image->width * image->height; i++) {
-        result->data[i] = (image->data[3 * i] + image->data[3 * i + 1] + image->data[3 * i + 2]) / 3.f;
-    }
-}
-
-void CudaGeneralHoughTransform::convolve(std::vector<std::vector<int>> filter, const GrayImage* source, GrayImage* result) {
-    if (filter.size() != 3 || filter[0].size() != 3) {
+__global__ void convolve(int** filter, float* source, float* result, int width, int height, int i, int j) {
+    if (index == 0 && (filter.size() != 3 || filter[0].size() != 3)) {
         std::cerr << "ERROR: convolve() only supports 3x3 filter.\n";
         return;
     }
-    result->setGrayImage(source->width, source->height);
-    for (int j = 0; j < source->height; j++) {
-        for (int i = 0; i < source->width; i++) {
-            float tmp = 0.f;
-            for (int jj = -1; jj <= 1; jj++) {
-                for (int ii = -1; ii <= 1; ii++) {
-                    int row = j + jj;
-                    int col = i + ii;
-                    if (row < 0 || row >= source->height || col < 0 || col >= source->width) {
-                        // out of image bound, do nothing
-                    } else {
-                        int idx = row * source->width + col;
-                        tmp += source->data[idx] * filter[jj + 1][ii + 1];
-                    }
-                }
-            }
-            // do not consider image boundary
-            if (j == 0 || j == source->height - 1 || i == 0 || i == source->width - 1) result->data[j * source->width + i] = 0;
-            else result->data[j * source->width + i] = tmp;
-        }
-    }
-}
-
-void CudaGeneralHoughTransform::magnitude(const GrayImage* gradientX, const GrayImage* gradientY, GrayImage* result) {
-    result->setGrayImage(gradientX->width, gradientX->height);
-    for (int i = 0; i < gradientX->width * gradientX->height; i++) {
-        result->data[i] = sqrt(gradientX->data[i] * gradientX->data[i] + gradientY->data[i] * gradientY->data[i]);
-    }
-}
-
-void CudaGeneralHoughTransform::orientation(const GrayImage* gradientX, const GrayImage* gradientY, GrayImage* result) {
-    result->setGrayImage(gradientX->width, gradientX->height);
-    for (int i = 0; i < gradientX->width * gradientX->height; i++) {
-        result->data[i] = fmod(atan2(gradientY->data[i], gradientX->data[i]) * 180 / PI + 360, 360);
-    }
-}
-
-void CudaGeneralHoughTransform::edgenms(const GrayImage* magnitude, const GrayImage* orientation, GrayImage* result) {
-    result->setGrayImage(orientation->width, orientation->height);
-    for (int j = 0 ; j < orientation->height; j++) {
-        for (int i = 0 ; i < orientation->width; i++) {
-            int pixelGradient = static_cast<int>(orientation->data[j * orientation->width + i] / 45) * 45 % 180;
-            if (keepPixel(magnitude, i, j, pixelGradient)) {
-                result->data[j * orientation->width + i] = magnitude->data[j * orientation->width + i];
+    float tmp = 0.f;
+    for (int jj = -1; jj <= 1; jj++) {
+        for (int ii = -1; ii <= 1; ii++) {
+            int row = j + jj;
+            int col = i + ii;
+            if (row < 0 || row >= height || col < 0 || col >= width) {
+                // out of image bound, do nothing
             } else {
-                result->data[j * orientation->width + i] = 0;
+                int idx = row * width + col;
+                tmp += source[idx] * filter[jj + 1][ii + 1];
             }
         }
     }
+    // do not consider image boundary
+    if (j == 0 || j == height - 1 || i == 0 || i == width - 1) result[threadIdx.y * TPB_X + threadIdx.x] = 0;
+    else result[threadIdx.y * TPB_X + threadIdx.x] = tmp;
 }
 
-void CudaGeneralHoughTransform::threshold(const GrayImage* magnitude, GrayImage* result, int threshold) {
-    result->setGrayImage(magnitude->width, magnitude->height);
-    for (int i = 0; i < magnitude->width * magnitude->height; i++) {
-        if (magnitude->data[i] > threshold) result->data[i] = 255;
-        else result->data[i] = 0;
+__global__ void magnitude(const float* gradientX, const float* gradientY, float* result, int i, int localIdx) {
+    result[i] = sqrt(gradientX[localIdx] * gradientX[localIdx] + gradientY[localIdx] * gradientY[localIdx]);
+}
+
+__global__ void orientation(const float* gradientX, const float* gradientY, float* result, int i, int localIdx) {
+    result[i] = fmod(atan2(gradientY[localIdx], gradientX[localIdx]) * 180 / cuConstParam.PI + 360, 360);
+}
+
+__global__ void edgenms(float* magnitude, float* orientation, float* result, int width, int height, int i, int j, int localIdx) {
+    int pixelGradient = static_cast<int>(orientation[localIdx] / 45) * 45 % 180;
+    if (keepPixel(magnitude, i, j, width, height, pixelGradient)) {
+        result[localIdx] = magnitude[localIdx];
+    } else {
+        result[localIdx] = 0;
     }
 }
 
-void CudaGeneralHoughTransform::createRTable(const GrayImage* orientation, const GrayImage* magThreshold) {
-    rTable.clear();
-    rTable.resize(nRotationSlices);
-
-    centerX = orientation->width / 2;
-    centerY = orientation->height / 2;
-
-    for (int j = 0 ; j < orientation->height; j++) {
-        for (int i = 0 ; i < orientation->width; i++) {
-            if (magThreshold->data[j * orientation->width + i] > 254) {
-                float phi = fmod(orientation->data[j * orientation->width + i], 360); // gradient direction in [0,360)
-                int iSlice = static_cast<int>(phi / deltaRotationAngle);
-                rEntry entry; 
-                auto entryX = centerX - i;
-                auto entryY = centerY - j;
-                entry.r = sqrt(entryX * entryX + entryY * entryY);
-                entry.alpha = static_cast<float>(atan2(entryY, entryX));
-                rTable[iSlice].push_back(entry);
-            }
-        }
-    }
+__global__ void threshold(float* magnitude, float* result, int threshold, int index, int localIdx) {
+    if (magnitude[localIdx] > threshold) result[localIdx] = index;
+    else result[localIdx] = -1;
 }
+
+__global__ void createRTable(const float* orient, const float* magThreshold, int width, int height, int index) {
+    centerX = width / 2;
+    centerY = height / 2;
+
+    if (magThreshold[localIdx] >= 0) {
+        float phi = fmod(orient[localIdx], 360); // gradient direction in [0,360)
+        int iSlice[index] = static_cast<int>(phi / cuConstParam.deltaRotationAngle);
+        int entryX = centerX - i;
+        int entryY = centerY - j;
+        entryR[index] = sqrt(entryX * entryX + entryY * entryY);
+        entryAlpha[index] = static_cast<float>(atan2(entryY, entryX));
+    }
+    else iSlice[index] = -1;
+
+}
+
+__global__ bool keepPixel(const float* magnitude, int indexX, int indexY, int width, int height, int gradient) {
+    int neighbourOnei = threadIdx.x;
+    int neighbourOnej = threadIdx.y;
+    int neighbourTwoi = threadIdx.x;
+    int neighbourTwoj = threadIdx.y;
+    
+    switch (gradient) {
+    case 0:
+        neighbourOnei -= 1;
+        neighbourTwoi += 1;
+        break;
+    case 45:
+        neighbourOnej -= 1;
+        neighbourOnei += 1;
+        neighbourTwoj += 1;
+        neighbourTwoi -= 1;
+        break;
+    case 90:
+        neighbourOnej -= 1;
+        neighbourTwoj += 1;
+        break;
+    default: // 135
+        neighbourOnej -= 1;
+        neighbourOnei -= 1;
+        neighbourTwoj += 1;
+        neighbourTwoi += 1;
+    }
+    
+    // out of the bound of this block => neighbour's pixel => access global memory
+    if (neighbourOnei < 0 || neighbourOnei >= TPB_X || neighbourOnej < 0 || neighbourOnej >= TPB_Y){
+        float neighbourOne = deviceData[(indexY + neighbourOnej) * width + (indexX + neighbourOnei)];
+    }
+    // in the bound of this block => access shared memory
+    else{
+        float neighbourOne = magnitude[neighbourOnej * TPB_X + neighbourOnei];
+    }
+    // out of the bound of this block => neighbour's pixel => access global memory
+    if (neighbourTwoi < 0 || neighbourTwoi >= TPB_X || neighbourTwoj < 0 || neighbourTwoj >= TPB_Y){
+        float neighbourTwo = deviceData[(indexY + neighbourOnej) * width + (indexX + neighbourOnei)];
+    }
+    // in the bound of this block => access shared memory
+    else{
+        float neighbourTwo = magnitude[neighbourTwoj * TPB_X + neighbourTwoi];
+    }
+    float cur = magnitude[threadIdx.y * TPB_X + threadIdx.x];
+    
+    return (neighbourOne <= cur) && (neighbourTwo <= cur);
+}
+
+struct compare_entry_by_rotation
+{
+    rEntry* entries;
+    compare_entry_by_rotation(rEntry* entries) : entries(entry) {};
+    __host__ __device__
+    bool operator()(rEntry r1, rEntry r2)
+    {
+        int iSlice1 = r1.iSlice;
+        int iSlice2 = r2.iSlice;
+        return iSlice1 < iSlice2;
+    }
+};
