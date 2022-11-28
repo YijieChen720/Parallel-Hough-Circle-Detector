@@ -381,6 +381,7 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
     int threadsPerBlock = 32;
     int blocks = (numEdgePixels + threadsPerBlock - 1) / threadsPerBlock;
     accumulate_kernel_naive<<<blocks, threadsPerBlock>>>(accumulator, edgePixels, numEdgePixels, srcOrient);
+    cudaDeviceSynchronize();
     // --------------------------------------------------------------------
 
     // --------------------------------------------------------------------
@@ -402,6 +403,8 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
     cudaMalloc(&numBlocks, sizeof(int));
     int threadsPerBlock = 32;
     findCutoffs_kernel<<<1, 1>>>(edgePixels, numEdgePixels, srcOrient, threadsPerBlock, startIndex, numBlocksDevice);
+    cudaDeviceSynchronize();
+
     int numBlocks;
     cudaMemcpy(&numBlocks, numBlocksDevice, sizeof(int), cudaMemcpyDeviceToHost); 
     cudaFree(numBlocksDevice);
@@ -412,17 +415,21 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
     cudaMalloc(&blockStarts, sizeof(int) * numBlocks);
     cudaMalloc(&blockEnds, sizeof(int) * numBlocks);
     fillIntervals_kernel<<<1, 1>>>(startIndex, numEdgePixels, threadsPerBlock, blockStarts, blockEnds);
+    cudaDeviceSynchronize();
 
     accumulate_kernel_better<<<numBlocks, threadsPerBlock>>>(accumulator, edgePixels, srcOrient, blockStarts, blockEnds);
+    cudaDeviceSynchronize();
 
     // (3) more parallelism: 
     //     a. put edge points into buckets by phi
     //     b. go by same phi, then same theta (2D) -> shared slice of 3D accumulator || then same scale (3D?) -> shared slice of 2D accumulator
     dim3 gridDim(numBlocks, nRotationSlices, nScaleSlices);
     accumulate_kernel_3D<<<gridDim, threadsPerBlock>>>(accumulator, edgePixels, srcOrient, blockStarts, blockEnds);
+    cudaDeviceSynchronize();
 
     // shared memory of accumulator slice
     accumulate_kernel_3D_sharedMemory<<<gridDim, threadsPerBlock>>>(accumulator, edgePixels, srcOrient, blockStarts, blockEnds);
+    cudaDeviceSynchronize();
 
     cudaFree(startIndex);
     cudaFree(blockStarts);
@@ -436,6 +443,7 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
     // Use a seperate kernel to fill in the blockMaxima array (avoid extra memory read)
     blocks = ((src->height / blockSize + 1) * (src->width / blockSize + 1) + threadsPerBlock - 1) / threadsPerBlock;
     findmaxima_kernel<<<blocks, threadsPerBlock>>>(accumulator, blockMaxima);
+    cudaDeviceSynchronize();
 
     // use thrust::max_element to get the max hit from blockMaxima
     thrust::device_ptr<Point> blockMaximaThrust = thrust::device_pointer_cast(blockMaxima);
