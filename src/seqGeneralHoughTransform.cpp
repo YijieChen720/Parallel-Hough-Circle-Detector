@@ -14,7 +14,7 @@ const float MINSCALE = 0.6f;
 const float deltaScaleRatio = 0.1f;
 const int nScaleSlices = (MAXSCALE - MINSCALE) / deltaScaleRatio + 1;
 const int blockSize = 10;
-const float thresRatio = 0.9;
+const float thresRatio = 0.3;
 
 SeqGeneralHoughTransform::SeqGeneralHoughTransform() {
     tpl = new Image;
