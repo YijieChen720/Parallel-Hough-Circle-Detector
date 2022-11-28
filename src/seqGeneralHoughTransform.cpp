@@ -118,8 +118,10 @@ void SeqGeneralHoughTransform::accumulateSource() {
     // initialize accumulator array (4D: Scale x Rotation x Width x Height)
     int width = magThreshold->width;
     int height = magThreshold->height;
-    std::vector<std::vector<std::vector<std::vector<int>>>> accumulator(nScaleSlices, std::vector<std::vector<std::vector<int>>>(nRotationSlices, std::vector<std::vector<int>>(width/blockSize+1, std::vector<int>(height/blockSize+1, 0))));
-    std::vector<std::vector<Point>> blockMaxima(width/blockSize+1, std::vector<Point>(height/blockSize+1, (struct Point){0, 0, 0, 0.f, 0.f}));
+    int wblock = (width + blockSize - 1) / blockSize;
+    int hblock = (height + blockSize - 1) / blockSize;
+    std::vector<std::vector<std::vector<std::vector<int>>>> accumulator(nScaleSlices, std::vector<std::vector<std::vector<int>>>(nRotationSlices, std::vector<std::vector<int>>(hblock, std::vector<int>(wblock, 0))));
+    std::vector<std::vector<Point>> blockMaxima(hblock, std::vector<Point>(wblock, (struct Point){0, 0, 0, 0.f, 0.f}));
 
     // Each edge pixel vote
     printf("------Start calculating accumulator-------\n");
@@ -145,15 +147,15 @@ void SeqGeneralHoughTransform::accumulateSource() {
                             int yc = j + round(r * s * sin(alpha + theta_r));
                             if (xc >= 0 && xc < width && yc >= 0 && yc < height){
                                 // use block here? too fine grained for pixel level
-                                accumulator[is][itheta][xc/blockSize][yc/blockSize]++;
+                                accumulator[is][itheta][yc/blockSize][xc/blockSize]++;
                                 // find maximum for each block
-                                if (accumulator[is][itheta][xc/blockSize][yc/blockSize] > blockMaxima[xc/blockSize][yc/blockSize].hits){
-                                    blockMaxima[xc/blockSize][yc/blockSize].hits = accumulator[is][itheta][xc/blockSize][yc/blockSize];
-                                    blockMaxima[xc/blockSize][yc/blockSize].x = xc/blockSize * blockSize + blockSize / 2;
-                                    blockMaxima[xc/blockSize][yc/blockSize].y = yc/blockSize * blockSize + blockSize / 2;
-                                    blockMaxima[xc/blockSize][yc/blockSize].scale = s;
-                                    blockMaxima[xc/blockSize][yc/blockSize].rotation = theta;
-                                    _max = (blockMaxima[xc/blockSize][yc/blockSize].hits > _max)? blockMaxima[xc/blockSize][yc/blockSize].hits: _max;
+                                if (accumulator[is][itheta][yc/blockSize][xc/blockSize] > blockMaxima[yc/blockSize][xc/blockSize].hits){
+                                    blockMaxima[yc/blockSize][xc/blockSize].hits = accumulator[is][itheta][yc/blockSize][xc/blockSize];
+                                    blockMaxima[yc/blockSize][xc/blockSize].x = xc/blockSize * blockSize + blockSize / 2;
+                                    blockMaxima[yc/blockSize][xc/blockSize].y = yc/blockSize * blockSize + blockSize / 2;
+                                    blockMaxima[yc/blockSize][xc/blockSize].scale = s;
+                                    blockMaxima[yc/blockSize][xc/blockSize].rotation = theta;
+                                    _max = (blockMaxima[yc/blockSize][xc/blockSize].hits > _max)? blockMaxima[yc/blockSize][xc/blockSize].hits: _max;
                                 }
                             }
                         }
@@ -167,10 +169,10 @@ void SeqGeneralHoughTransform::accumulateSource() {
 
     // find local maxima
     int maximaThres = round(_max * thresRatio);
-    for (int i = 0; i <= width/blockSize ; i++){
-        for (int j = 0; j <= height/blockSize; j++){
-            if (blockMaxima[i][j].hits > maximaThres) {
-                Point p = (struct Point){blockMaxima[i][j].x, blockMaxima[i][j].y, blockMaxima[i][j].hits, blockMaxima[i][j].scale, blockMaxima[i][j].rotation};
+    for (int j = 0; j < hblock; j++){
+        for (int i = 0; i < wblock ; i++){
+            if (blockMaxima[j][i].hits > maximaThres) {
+                Point p = (struct Point){blockMaxima[j][i].x, blockMaxima[j][i].y, blockMaxima[j][i].hits, blockMaxima[j][i].scale, blockMaxima[j][i].rotation};
                 hitPoints.push_back(p);
                 printf("hit points: %d %d hits: %d scale: %f rotation: %f\n", p.x, p.y, p.hits, p.scale, p.rotation);
             }
