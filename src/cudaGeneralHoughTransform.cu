@@ -31,22 +31,24 @@ struct GlobalConstants {
     float thresRatio;
 };
 
-const int THRESHOLD = 200;
-const float PI = 3.14159265;
-const int nRotationSlices = 72;
-const float deltaRotationAngle = 360 / nRotationSlices;
-const float MAXSCALE = 1.4f;
-const float MINSCALE = 0.6f;
-const float deltaScaleRatio = 0.1f;
-const int nScaleSlices = (MAXSCALE - MINSCALE) / deltaScaleRatio + 1;
-const int blockSize = 10;
-const float thresRatio = 0.9;
-
+GlobalConstants params;
 __constant__ GlobalConstants cuConstParams;
-__device__ float* grayData;
-__device__ float* orient;
-__device__ rEntry* entries;
-__device__ int* startPos;
+
+#define DEBUG
+#ifdef DEBUG
+#define cudaCheckError(ans)  cudaAssert((ans), __FILE__, __LINE__);
+inline void cudaAssert(cudaError_t code, const char *file, int line, bool abort=true)
+{   
+    if (code != cudaSuccess)
+    {
+       fprintf(stderr, "CUDA Error: %s at %s:%d\n",
+         cudaGetErrorString(code), file, line);
+       if (abort) exit(code);
+    }
+}
+#else
+#define cudaCheckError(ans) ans
+#endif
 
 struct compare_entry_by_rotation
 {
@@ -85,24 +87,23 @@ void CudaGeneralHoughTransform::setup() {
     }
     printf("---------------------------------------------------------\n");
 
-    GlobalConstants params;
-    params.THRESHOLD = THRESHOLD;
-    params.PI = PI;
-    params.nRotationSlices = nRotationSlices;
-    params.deltaRotationAngle = deltaRotationAngle;
-    params.MAXSCALE = MAXSCALE;
-    params.MINSCALE = MINSCALE;
-    params.deltaScaleRatio = deltaScaleRatio;
-    params.nScaleSlices = nScaleSlices;
-    params.blockSize = blockSize;
-    params.thresRatio = thresRatio;
+    params.THRESHOLD = 200;
+    params.PI = 3.14159265;
+    params.nRotationSlices = 72;
+    params.deltaRotationAngle = 360 / params.nRotationSlices;
+    params.MAXSCALE = 1.4f;
+    params.MINSCALE = 0.6f;
+    params.deltaScaleRatio = 0.1f;
+    params.nScaleSlices = (params.MAXSCALE - params.MINSCALE) / params.deltaScaleRatio + 1;
+    params.blockSize = 10;
+    params.thresRatio = 0.9;
 
     cudaMemcpyToSymbol(cuConstParams, &params, sizeof(GlobalConstants));
 
 }
 
 __device__ __inline__
-void convolve(int filter[3][3], float* source, float* result, int width, int height, int i, int j, int localIdx) {
+void convolve(int filter[3][3], const float* source, float* result, int width, int height, int i, int j, int localIdx) {
     // if (i == 0 && j == 0 && (filter.size() != 3 || filter[0].size() != 3)) {
     //     std::cerr << "ERROR: convolve() only supports 3x3 filter.\n";
     //     return;
@@ -127,7 +128,7 @@ void convolve(int filter[3][3], float* source, float* result, int width, int hei
 
 __device__ __inline__
 void magnitude(const float* gradientX, const float* gradientY, float* result, int i, int localIdx) {
-    grayData[i] = sqrtf(gradientX[localIdx] * gradientX[localIdx] + gradientY[localIdx] * gradientY[localIdx]);
+    result[i] = sqrtf(gradientX[localIdx] * gradientX[localIdx] + gradientY[localIdx] * gradientY[localIdx]);
 }
 
 __device__ __inline__
@@ -136,7 +137,7 @@ void orientation(const float* gradientX, const float* gradientY, float* result, 
 }
 
 __device__ __inline__
-bool keepPixel(const float* magnitude, int indexX, int indexY, int width, int height, int gradient) {
+bool keepPixel(const float* grayData, const float* magnitude, int indexX, int indexY, int width, int height, int gradient) {
     int neighbourOnei = threadIdx.x;
     int neighbourOnej = threadIdx.y;
     int neighbourTwoi = threadIdx.x;
@@ -187,9 +188,9 @@ bool keepPixel(const float* magnitude, int indexX, int indexY, int width, int he
 }
 
 __device__ __inline__
-void edgenms(float* magnitude, float* orientation, float* result, int width, int height, int i, int j, int localIdx) {
+void edgenms(float* grayData, float* magnitude, float* orientation, float* result, int width, int height, int i, int j, int localIdx) {
     int pixelGradient = static_cast<int>(orientation[localIdx] / 45) * 45 % 180;
-    if (keepPixel(magnitude, i, j, width, height, pixelGradient)) {
+    if (keepPixel(grayData, magnitude, i, j, width, height, pixelGradient)) {
         result[localIdx] = magnitude[localIdx];
     } else {
         result[localIdx] = 0;
@@ -203,7 +204,7 @@ void threshold(float* magnitude, float* result, int threshold, int index, int lo
 }
 
 __device__ __inline__
-void createRTable(const float* orient, const float* magThreshold, int width, int height, int i, int j, int index, int localIdx) {
+void createRTable(rEntry* entries, const float* orient, const float* magThreshold, int width, int height, int i, int j, int index, int localIdx) {
     int centerX = width / 2;
     int centerY = height / 2;
 
@@ -219,14 +220,14 @@ void createRTable(const float* orient, const float* magThreshold, int width, int
 
 }
 
-__global__ void kernelConvertToGray(float* data, int width, int height){
+__global__ void kernelConvertToGray(const unsigned char* data, float* grayData, int width, int height){
     int indexX = blockIdx.x * blockDim.x + threadIdx.x;
     int indexY = blockIdx.y * blockDim.y + threadIdx.y;
     int index = indexY * width + indexX;
 
     if (indexX >= width || indexY >= height) return;
 
-    data[index] = (grayData[3 * index] + grayData[3 * index + 1] +grayData[3 * index + 2]) / 3.f;
+    grayData[index] = (data[3 * index] + data[3 * index + 1] + data[3 * index + 2]) / 3.f;
 }
 
 // parallel convolveX, convolveY
@@ -261,7 +262,7 @@ __global__ void kernelConvertToGray(float* data, int width, int height){
 // }
 
 
-__global__ void kernelProcessStep1(int width, int height){
+__global__ void kernelProcessStep1(float* grayData, float* orient, int width, int height){
     int indexX = blockIdx.x * blockDim.x + threadIdx.x;
     int indexY = blockIdx.y * blockDim.y + threadIdx.y;
     int index = indexY * width + indexX;
@@ -273,13 +274,13 @@ __global__ void kernelProcessStep1(int width, int height){
     __shared__ float gradientY[TPB];
     int sobel[3][3] = {{1, 0, -1}, {2, 0, -2}, {1, 0, -1}};
     convolve(sobel, grayData, gradientX, width, height, indexX, indexY, localIdx);
-    convolve(sobel, grayData, gradientY, width, height, indexX, indexY, localIdx);
+    convolve(sobel, grayData, gradientY, width, height, indexX, indexY, localIdx);  
 
     magnitude(gradientX, gradientY, grayData, index, localIdx);
     orientation(gradientX, gradientY, orient, index, localIdx);
 }
 
-__global__ void kernelProcessStep2(int width, int height, bool tpl){
+__global__ void kernelProcessStep2(float* grayData, float* orient, rEntry* entries, int width, int height, bool tpl){
     int indexX = blockIdx.x * blockDim.x + threadIdx.x;
     int indexY = blockIdx.y * blockDim.y + threadIdx.y;
     int index = indexY * width + indexX;
@@ -296,12 +297,12 @@ __global__ void kernelProcessStep2(int width, int height, bool tpl){
     orientation[localIdx] = orient[index]; 
     __syncthreads();
     
-    edgenms(magnitude, orientation, magThreshold, width, height, indexX, indexY, localIdx); 
+    edgenms(grayData, magnitude, orientation, magThreshold, width, height, indexX, indexY, localIdx); 
     threshold(magThreshold, magThreshold, cuConstParams.THRESHOLD, index, localIdx);
 
     // if processing template, only need to create R table
     if (tpl){
-        createRTable(orientation, magThreshold, width, height, indexX, indexY, index, localIdx);
+        createRTable(entries, orientation, magThreshold, width, height, indexX, indexY, index, localIdx);
     }
     // if processing source, write the result data back to global memory
     else{
@@ -309,16 +310,33 @@ __global__ void kernelProcessStep2(int width, int height, bool tpl){
     }
 }
 
-__global__ void processRTable(int width, int height){
+__global__ void processRTable(rEntry* entries, int* startPos, int width, int height){
+    // for (int i = 8930; i < 8950; i++){
+    //     printf("i: %d\n", entries[i].iSlice);
+    // } 
     int i = 0;
-    int angle = cuConstParams.deltaRotationAngle;
     while(i < width * height){
-        if (entries[i].iSlice < 0) continue;
-        while (i!=0 || entries[i].iSlice == entries[i-1].iSlice) {i++;}
-        for (int j = entries[i-1].iSlice/angle+1; j < entries[i].iSlice/angle+1; j++){
+        if (entries[i].iSlice < 0) {
+            i++;
+            continue;
+        }
+        if (i==0) {
+            for (int j = 0; j < entries[0].iSlice+1; j++){
+                startPos[j] = i;
+            }
+            i++;
+            continue;
+        }
+        while (i < width * height && entries[i].iSlice == entries[i-1].iSlice) {i++;}
+        for (int j = entries[i-1].iSlice+1; j < entries[i].iSlice+1; j++){
             startPos[j] = i;
         }
-    }    
+        i++;
+    }
+    for (int j = entries[i-1].iSlice+1; j < width * height; j++){
+        startPos[j] = i;
+    }
+    printf("startPos: %d %d %d\n", startPos[0], startPos[36], startPos[71]);
 }
 
 // 1. no need to allocate each image in cpu
@@ -326,76 +344,75 @@ __global__ void processRTable(int width, int height){
 // 3. parallel convolveX, convolveY
 // 4. parallel magnitude & orientation
 void CudaGeneralHoughTransform::processTemplate() {
-    float* deviceTplData;
+    printf("----------Start processing template----------\n");
+    unsigned char* deviceTplData;
     float* tplGrayData;
-    float* tmpOrientation;
-    rEntry* tmpEntries;
+    float* orient;
 
-    cudaMalloc(&deviceTplData, tpl->width * tpl->height * sizeof(float));
-    cudaMalloc(&tplGrayData, 3 * tpl->width * tpl->height * sizeof(float));
-    cudaMemcpy(deviceTplData, tpl->data, tpl->width * tpl->height * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpyToSymbol(grayData, &tplGrayData, sizeof(float*));
+    cudaCheckError(cudaMalloc(&deviceTplData, 3 * tpl->width * tpl->height * sizeof(unsigned char)));
+    cudaCheckError(cudaMemcpy(deviceTplData, tpl->data, 3 * tpl->width * tpl->height * sizeof(unsigned char), cudaMemcpyHostToDevice));
 
-    cudaMalloc(&tmpEntries, tpl->width * tpl->height * sizeof(rEntry));
-    cudaMemcpyToSymbol(entries, &tmpEntries, sizeof(rEntry*));
+    cudaMalloc(&tplGrayData, tpl->width * tpl->height * sizeof(float));
+    cudaMemset(tplGrayData, 0, tpl->width * tpl->height * sizeof(float));
+
+    cudaMalloc(&entries, tpl->width * tpl->height * sizeof(rEntry));
+    cudaMemset(entries, 0, tpl->width * tpl->height * sizeof(rEntry));
     
-    cudaMalloc(&tmpOrientation, tpl->width * tpl->height * sizeof(float));
-    cudaMemcpyToSymbol(orient, &tmpOrientation, sizeof(float*));
+    cudaMalloc(&orient, tpl->width * tpl->height * sizeof(float));
+    cudaMemset(orient, 0, tpl->width * tpl->height * sizeof(float));
+
 
     dim3 blockDim(TPB_X, TPB_Y, 1);
     dim3 gridDim((tpl->width + TPB_X - 1) / TPB_X, 
                  (tpl->height + TPB_Y - 1) / TPB_Y, 1);
-    
-    kernelConvertToGray<<<gridDim, blockDim>>>(deviceTplData, tpl->width, tpl->height);
+    kernelConvertToGray<<<gridDim, blockDim>>>(deviceTplData, tplGrayData, tpl->width, tpl->height);
     cudaDeviceSynchronize();
 
-    kernelProcessStep1<<<gridDim, blockDim>>>(tpl->width, tpl->height);
+    kernelProcessStep1<<<gridDim, blockDim>>>(tplGrayData, orient, tpl->width, tpl->height);
     cudaDeviceSynchronize();
 
-    kernelProcessStep2<<<gridDim, blockDim>>>(tpl->width, tpl->height, true);
+    kernelProcessStep2<<<gridDim, blockDim>>>(tplGrayData, orient, entries, tpl->width, tpl->height, true);
     cudaDeviceSynchronize();  
-
-    thrust::device_ptr<rEntry> entriesThrust = thrust::device_pointer_cast(tmpEntries); 
+    
+    thrust::device_ptr<rEntry> entriesThrust = thrust::device_pointer_cast(entries); 
 
     thrust::sort(entriesThrust, entriesThrust + tpl->width * tpl->height, compare_entry_by_rotation());
-    // cudaMemcpyToSymbol(entries, &tmpEntries, sizeof(rEntry*));
+    cudaDeviceSynchronize(); 
 
-    int* tmpStartPos;
-    cudaMalloc(&tmpStartPos, nRotationSlices * sizeof(int));
-    cudaMemcpyToSymbol(startPos, &tmpStartPos, sizeof(int*));
-    processRTable<<<1, 1>>>(tpl->width, tpl->height);
+    cudaMalloc(&startPos, params.nRotationSlices * sizeof(int));
+    processRTable<<<1, 1>>>(entries, startPos, tpl->width, tpl->height);
     
     // memory deallocation
-    cudaFree(tmpEntries);
-    cudaFree(deviceTplData);
-    cudaFree(tmpOrientation);
-    cudaFree(tplGrayData);
+    cudaCheckError(cudaFree(deviceTplData));
+    cudaCheckError(cudaFree(orient));
+    cudaCheckError(cudaFree(tplGrayData));
+    printf("----------End Processing Template----------\n");
 }
 
 void CudaGeneralHoughTransform::accumulateSource() {
-    float* deviceSrcData;
+    unsigned char* deviceSrcData;
     float* srcGrayData;
-    float* tmpOrientation;
+    float* orient;
 
-    cudaMalloc(&deviceSrcData, src->width * src->height * sizeof(float));
-    cudaMalloc(&srcGrayData, 3 * src->width * src->height * sizeof(float));
-    cudaMemcpy(deviceSrcData, src->data, src->width * src->height * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpyToSymbol(grayData, &srcGrayData, sizeof(float*));
+    cudaMalloc(&deviceSrcData, 3 * src->width * src->height * sizeof(unsigned char));
+    cudaMalloc(&srcGrayData, src->width * src->height * sizeof(float));
+    cudaMemcpy(deviceSrcData, src->data, 3 * src->width * src->height * sizeof(unsigned char), cudaMemcpyHostToDevice);
+    //cudaMemcpyToSymbol(grayData, &srcGrayData, sizeof(float*));
 
-    cudaMalloc(&tmpOrientation, src->width * src->height * sizeof(float));
-    cudaMemcpyToSymbol(orient, &tmpOrientation, sizeof(float*));
+    cudaMalloc(&orient, src->width * src->height * sizeof(float));
+    //cudaMemcpyToSymbol(orient, &tmpOrientation, sizeof(float*));
 
     dim3 blockDim(TPB_X, TPB_Y, 1);
     dim3 gridDim((src->width + TPB_X - 1) / TPB_X, 
                  (src->height + TPB_Y - 1) / TPB_Y, 1);
     
-    kernelConvertToGray<<<gridDim, blockDim>>>(deviceSrcData, src->width, src->height);
+    kernelConvertToGray<<<gridDim, blockDim>>>(deviceSrcData, srcGrayData, src->width, src->height);
     cudaDeviceSynchronize();
 
-    kernelProcessStep1<<<gridDim, blockDim>>>(src->width, src->height);
+    kernelProcessStep1<<<gridDim, blockDim>>>(srcGrayData, orient, src->width, src->height);
     cudaDeviceSynchronize();
 
-    kernelProcessStep2<<<gridDim, blockDim>>>(src->width, src->height, false);
+    kernelProcessStep2<<<gridDim, blockDim>>>(srcGrayData, orient, entries, src->width, src->height, false);
     cudaDeviceSynchronize();  
 
     // GrayImage* magThreshold = new GrayImage;
@@ -403,7 +420,7 @@ void CudaGeneralHoughTransform::accumulateSource() {
 
     // memory deallocation
     cudaFree(srcGrayData);
-    cudaFree(tmpOrientation);
+    cudaFree(orient);
     cudaFree(deviceSrcData);
 }
 
