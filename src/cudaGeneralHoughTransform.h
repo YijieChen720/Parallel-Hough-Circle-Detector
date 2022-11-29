@@ -30,6 +30,8 @@ private:
     int centerX, centerY;
     std::vector<Point> hitPoints;
     std::vector<std::vector<rEntry>> rTable;
+    rEntry* entries;
+    int* startPos;
 
     void convertToGray(const Image* image, GrayImage* result);
     

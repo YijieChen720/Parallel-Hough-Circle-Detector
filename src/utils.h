@@ -3,6 +3,7 @@
 #include <string>
 
 struct rEntry {
+    int iSlice;
     float r;  // sqrt is expensive, only do it once
     float alpha; // arctan2 is expensive, only do it once
 };
