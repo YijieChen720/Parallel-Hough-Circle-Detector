@@ -127,10 +127,12 @@ void SeqGeneralHoughTransform::accumulateSource() {
 
     // Each edge pixel vote
     printf("------Start calculating accumulator-------\n");
+    int cnt = 0;
     int _max = 0;
     for (int j = 0 ; j < height; j++) {
         for (int i = 0 ; i < width; i++) {
             if (magThreshold->data[j * width + i] > 254) {
+                cnt++;
                 // calculate edge gradient
                 float phi = orient->data[j * width + i]; // gradient direction in [0,360)
                 for (int itheta = 0; itheta < nRotationSlices; itheta++){
@@ -168,6 +170,7 @@ void SeqGeneralHoughTransform::accumulateSource() {
     }
     printf("max value in accumulator: %d\n", _max);
     printf("------End calculating accumulator-------\n");
+    printf("edge pixel cnt: %d\n", cnt);
 
     // find local maxima
     int maximaThres = round(_max * thresRatio);
@@ -316,4 +319,7 @@ void SeqGeneralHoughTransform::createRTable(const GrayImage* orientation, const 
             }
         }
     }
+    // for (int i = 0; i < nRotationSlices; i++) {
+        // std::cout<<"slice: "<<i<<", entries: "<<rTable[i].size()<<std::endl;
+    // }
 }
