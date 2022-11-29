@@ -47,4 +47,5 @@ private:
 
     void createRTable(const GrayImage* orientation, const GrayImage* magnitude);
 
+    void accumulate(float* srcThreshold, float* srcOrient);
 };

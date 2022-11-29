@@ -4,6 +4,7 @@
 
 #include "seqGeneralHoughTransform.h"
 #include "utils.h"
+#include "cycleTimer.h"
 
 const int THRESHOLD = 200;
 const float PI = 3.14159265;
@@ -115,6 +116,7 @@ void SeqGeneralHoughTransform::accumulateSource() {
     threshold(magSupressed, magThreshold, THRESHOLD);
     // -------Reuse from processTemplate ends-------
 
+    double startAccumulateTime = CycleTimer::currentSeconds();
     // initialize accumulator array (4D: Scale x Rotation x Width x Height)
     int width = magThreshold->width;
     int height = magThreshold->height;
@@ -178,6 +180,9 @@ void SeqGeneralHoughTransform::accumulateSource() {
             }
         }
     }
+    double endAccumulateTime = CycleTimer::currentSeconds();
+    double totalAccumulateTime = endAccumulateTime - startAccumulateTime;
+    printf("Accumulate:        %.4f ms\n", 1000.f * totalAccumulateTime);
 
     // memory deallocation
     delete graySrc;
