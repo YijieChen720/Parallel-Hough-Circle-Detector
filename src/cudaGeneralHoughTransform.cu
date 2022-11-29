@@ -439,7 +439,6 @@ void CudaGeneralHoughTransform::processTemplate() {
 }
 
 void CudaGeneralHoughTransform::accumulateSource() {
-    printf("accumulate\n");
     unsigned char* deviceSrcData;
     float* srcGrayData;
     float* orient;
@@ -473,9 +472,8 @@ void CudaGeneralHoughTransform::accumulateSource() {
     // memory deallocation
     cudaFree(srcGrayData);
     cudaFree(orient);
-    // cudaFree(deviceSrcData);
+    cudaFree(deviceSrcData);
     cudaFree(mag);
-    printf("accumulate ok\n");
 }
 
 void CudaGeneralHoughTransform::saveOutput() {
