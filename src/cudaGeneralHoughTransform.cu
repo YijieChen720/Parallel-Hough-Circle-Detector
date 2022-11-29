@@ -137,7 +137,7 @@ void orientation(const float* gradientX, const float* gradientY, float* result, 
 }
 
 __device__ __inline__
-bool keepPixel(const float* grayData, const float* magnitude, int indexX, int indexY, int width, int height, int gradient) {
+bool keepPixel(const float* mag, const float* magnitude, int indexX, int indexY, int width, int height, int gradient) {
     int neighbourOnei = threadIdx.x;
     int neighbourOnej = threadIdx.y;
     int neighbourTwoi = threadIdx.x;
@@ -168,7 +168,7 @@ bool keepPixel(const float* grayData, const float* magnitude, int indexX, int in
     float neighbourOne, neighbourTwo;
     // out of the bound of this block => neighbour's pixel => access global memory
     if (neighbourOnei < 0 || neighbourOnei >= TPB_X || neighbourOnej < 0 || neighbourOnej >= TPB_Y){
-        neighbourOne = grayData[(indexY + neighbourOnej) * width + (indexX + neighbourOnei)];
+        neighbourOne = mag[(indexY + neighbourOnej) * width + (indexX + neighbourOnei)];
     }
     // in the bound of this block => access shared memory
     else{
@@ -176,7 +176,7 @@ bool keepPixel(const float* grayData, const float* magnitude, int indexX, int in
     }
     // out of the bound of this block => neighbour's pixel => access global memory
     if (neighbourTwoi < 0 || neighbourTwoi >= TPB_X || neighbourTwoj < 0 || neighbourTwoj >= TPB_Y){
-        neighbourTwo = grayData[(indexY + neighbourOnej) * width + (indexX + neighbourOnei)];
+        neighbourTwo = mag[(indexY + neighbourOnej) * width + (indexX + neighbourOnei)];
     }
     // in the bound of this block => access shared memory
     else{
@@ -188,9 +188,9 @@ bool keepPixel(const float* grayData, const float* magnitude, int indexX, int in
 }
 
 __device__ __inline__
-void edgenms(float* grayData, float* magnitude, float* orientation, float* result, int width, int height, int i, int j, int localIdx) {
+void edgenms(float* mag, float* magnitude, float* orientation, float* result, int width, int height, int i, int j, int localIdx) {
     int pixelGradient = static_cast<int>(orientation[localIdx] / 45) * 45 % 180;
-    if (keepPixel(grayData, magnitude, i, j, width, height, pixelGradient)) {
+    if (keepPixel(mag, magnitude, i, j, width, height, pixelGradient)) {
         result[localIdx] = magnitude[localIdx];
     } else {
         result[localIdx] = 0;
@@ -261,8 +261,34 @@ __global__ void kernelConvertToGray(const unsigned char* data, float* grayData, 
 //     }
 // }
 
+// __global__ void kernelConvolve(float* grayData, float* gradientX, float* gradientY, int width, int height){
+//     int indexX = blockIdx.x * blockDim.x + threadIdx.x;
+//     int indexY = blockIdx.y * blockDim.y + threadIdx.y;
+//     int index = indexY * width + indexX;
+//     int localIdx = threadIdx.y*TPB_X+threadIdx.x;
 
-__global__ void kernelProcessStep1(float* grayData, float* orient, int width, int height){
+//     if (indexX >= width || indexY >= height) return;
+
+//     // __shared__ float gradientX[TPB];
+//     // __shared__ float gradientY[TPB];
+//     int sobelX[3][3] = {{1, 0, -1}, {2, 0, -2}, {1, 0, -1}};
+//     int sobelY[3][3] = {{1, 2, 1}, {0, 0, 0}, {-1, -2, -1}};
+//     convolve(sobelX, grayData, gradientX, width, height, indexX, indexY, index);
+//     convolve(sobelY, grayData, gradientY, width, height, indexX, indexY, index); 
+// }
+
+// __global__ void kernelProcessStep1(float* gradientX, float* gradientY, float* mag, float* orient, int width, int height){
+//     int indexX = blockIdx.x * blockDim.x + threadIdx.x;
+//     int indexY = blockIdx.y * blockDim.y + threadIdx.y;
+//     int index = indexY * width + indexX;
+//     int localIdx = threadIdx.y*TPB_X+threadIdx.x;
+
+//     if (indexX >= width || indexY >= height) return;
+//     magnitude(gradientX, gradientY, mag, index, index);
+//     orientation(gradientX, gradientY, orient, index, index);
+// }
+
+__global__ void kernelProcessStep1(float* grayData, float* mag, float* orient, int width, int height){
     int indexX = blockIdx.x * blockDim.x + threadIdx.x;
     int indexY = blockIdx.y * blockDim.y + threadIdx.y;
     int index = indexY * width + indexX;
@@ -272,15 +298,16 @@ __global__ void kernelProcessStep1(float* grayData, float* orient, int width, in
 
     __shared__ float gradientX[TPB];
     __shared__ float gradientY[TPB];
-    int sobel[3][3] = {{1, 0, -1}, {2, 0, -2}, {1, 0, -1}};
-    convolve(sobel, grayData, gradientX, width, height, indexX, indexY, localIdx);
-    convolve(sobel, grayData, gradientY, width, height, indexX, indexY, localIdx);  
+    int sobelX[3][3] = {{1, 0, -1}, {2, 0, -2}, {1, 0, -1}};
+    int sobelY[3][3] = {{1, 2, 1}, {0, 0, 0}, {-1, -2, -1}};
+    convolve(sobelX, grayData, gradientX, width, height, indexX, indexY, localIdx);
+    convolve(sobelY, grayData, gradientY, width, height, indexX, indexY, localIdx); 
 
-    magnitude(gradientX, gradientY, grayData, index, localIdx);
+    magnitude(gradientX, gradientY, mag, index, localIdx);
     orientation(gradientX, gradientY, orient, index, localIdx);
 }
 
-__global__ void kernelProcessStep2(float* grayData, float* orient, rEntry* entries, int width, int height, bool tpl){
+__global__ void kernelProcessStep2(float* mag, float* orient, rEntry* entries, int width, int height, bool tpl){
     int indexX = blockIdx.x * blockDim.x + threadIdx.x;
     int indexY = blockIdx.y * blockDim.y + threadIdx.y;
     int index = indexY * width + indexX;
@@ -293,11 +320,11 @@ __global__ void kernelProcessStep2(float* grayData, float* orient, rEntry* entri
     __shared__ float magThreshold[TPB];
     // load this block's magnitude and orient value in shared memory, 
     // decreasing the global memory access
-    magnitude[localIdx] = grayData[index]; 
+    magnitude[localIdx] = mag[index]; 
     orientation[localIdx] = orient[index]; 
     __syncthreads();
     
-    edgenms(grayData, magnitude, orientation, magThreshold, width, height, indexX, indexY, localIdx); 
+    edgenms(mag, magnitude, orientation, magThreshold, width, height, indexX, indexY, localIdx); 
     threshold(magThreshold, magThreshold, cuConstParams.THRESHOLD, index, localIdx);
 
     // if processing template, only need to create R table
@@ -306,20 +333,16 @@ __global__ void kernelProcessStep2(float* grayData, float* orient, rEntry* entri
     }
     // if processing source, write the result data back to global memory
     else{
-        grayData[index] = magThreshold[localIdx];
+        mag[index] = magThreshold[localIdx];
     }
 }
 
 __global__ void processRTable(rEntry* entries, int* startPos, int width, int height){
-    // for (int i = 8930; i < 8950; i++){
-    //     printf("i: %d\n", entries[i].iSlice);
-    // } 
     int i = 0;
+    for (i = 0; i < width * height; i++){
+        if (entries[i].iSlice >= 0) break;
+    }
     while(i < width * height){
-        if (entries[i].iSlice < 0) {
-            i++;
-            continue;
-        }
         if (i==0) {
             for (int j = 0; j < entries[0].iSlice+1; j++){
                 startPos[j] = i;
@@ -333,10 +356,11 @@ __global__ void processRTable(rEntry* entries, int* startPos, int width, int hei
         }
         i++;
     }
-    for (int j = entries[i-1].iSlice+1; j < width * height; j++){
-        startPos[j] = i;
+    for (int j = entries[i-2].iSlice+1; j < cuConstParams.nRotationSlices; j++){
+        startPos[j] = width * height;
     }
-    printf("startPos: %d %d %d\n", startPos[0], startPos[36], startPos[71]);
+    printf("startPos: %d %d %d %d %d\n", startPos[0], startPos[1], startPos[2], startPos[3], startPos[4]);
+    printf("startPos: %d %d\n", startPos[70], startPos[71]);
 }
 
 // 1. no need to allocate each image in cpu
@@ -347,32 +371,46 @@ void CudaGeneralHoughTransform::processTemplate() {
     printf("----------Start processing template----------\n");
     unsigned char* deviceTplData;
     float* tplGrayData;
+    float* mag;
     float* orient;
 
-    cudaCheckError(cudaMalloc(&deviceTplData, 3 * tpl->width * tpl->height * sizeof(unsigned char)));
-    cudaCheckError(cudaMemcpy(deviceTplData, tpl->data, 3 * tpl->width * tpl->height * sizeof(unsigned char), cudaMemcpyHostToDevice));
+    cudaMalloc(&deviceTplData, 3 * tpl->width * tpl->height * sizeof(unsigned char));
+    cudaMemcpy(deviceTplData, tpl->data, 3 * tpl->width * tpl->height * sizeof(unsigned char), cudaMemcpyHostToDevice);
 
     cudaMalloc(&tplGrayData, tpl->width * tpl->height * sizeof(float));
-    cudaMemset(tplGrayData, 0, tpl->width * tpl->height * sizeof(float));
 
     cudaMalloc(&entries, tpl->width * tpl->height * sizeof(rEntry));
-    cudaMemset(entries, 0, tpl->width * tpl->height * sizeof(rEntry));
-    
+    cudaMalloc(&mag, tpl->width * tpl->height * sizeof(float));
     cudaMalloc(&orient, tpl->width * tpl->height * sizeof(float));
-    cudaMemset(orient, 0, tpl->width * tpl->height * sizeof(float));
-
 
     dim3 blockDim(TPB_X, TPB_Y, 1);
     dim3 gridDim((tpl->width + TPB_X - 1) / TPB_X, 
                  (tpl->height + TPB_Y - 1) / TPB_Y, 1);
     kernelConvertToGray<<<gridDim, blockDim>>>(deviceTplData, tplGrayData, tpl->width, tpl->height);
     cudaDeviceSynchronize();
+    // GrayImage* grayTpl = new GrayImage;
+    // grayTpl->setGrayImage(tpl->width, tpl->height);
+    // cudaMemcpy(grayTpl->data, tplGrayData, tpl->width * tpl->height * sizeof(float), cudaMemcpyDeviceToHost);
+    // writeGrayPPMImage(grayTpl, "gray1.ppm");
 
-    kernelProcessStep1<<<gridDim, blockDim>>>(tplGrayData, orient, tpl->width, tpl->height);
+    kernelProcessStep1<<<gridDim, blockDim>>>(tplGrayData, mag, orient, tpl->width, tpl->height);
     cudaDeviceSynchronize();
 
-    kernelProcessStep2<<<gridDim, blockDim>>>(tplGrayData, orient, entries, tpl->width, tpl->height, true);
+    GrayImage* magTpl = new GrayImage;
+    // magTpl->setGrayImage(tpl->width, tpl->height);
+    // cudaMemcpy(magTpl->data, mag, tpl->width * tpl->height * sizeof(float), cudaMemcpyDeviceToHost);
+    // writeGrayPPMImage(magTpl, "mag1.ppm");
+    // GrayImage* orientTpl = new GrayImage;
+    // orientTpl->setGrayImage(tpl->width, tpl->height);
+    // cudaMemcpy(orientTpl->data, orient, tpl->width * tpl->height * sizeof(float), cudaMemcpyDeviceToHost);
+    // writeGrayPPMImage(orientTpl, "orient1.ppm");
+
+    kernelProcessStep2<<<gridDim, blockDim>>>(mag, orient, entries, tpl->width, tpl->height, true);
     cudaDeviceSynchronize();  
+
+    // cudaMemcpy(magTpl->data, mag, tpl->width * tpl->height * sizeof(float), cudaMemcpyDeviceToHost);
+    // writeGrayPPMImage(magTpl, "threshold1.ppm");
+
     
     thrust::device_ptr<rEntry> entriesThrust = thrust::device_pointer_cast(entries); 
 
@@ -386,6 +424,7 @@ void CudaGeneralHoughTransform::processTemplate() {
     cudaCheckError(cudaFree(deviceTplData));
     cudaCheckError(cudaFree(orient));
     cudaCheckError(cudaFree(tplGrayData));
+    cudaCheckError(cudaFree(mag));
     printf("----------End Processing Template----------\n");
 }
 
@@ -393,12 +432,13 @@ void CudaGeneralHoughTransform::accumulateSource() {
     unsigned char* deviceSrcData;
     float* srcGrayData;
     float* orient;
+    float* mag;
 
     cudaMalloc(&deviceSrcData, 3 * src->width * src->height * sizeof(unsigned char));
     cudaMalloc(&srcGrayData, src->width * src->height * sizeof(float));
     cudaMemcpy(deviceSrcData, src->data, 3 * src->width * src->height * sizeof(unsigned char), cudaMemcpyHostToDevice);
     //cudaMemcpyToSymbol(grayData, &srcGrayData, sizeof(float*));
-
+    cudaMalloc(&mag, tpl->width * tpl->height * sizeof(float));
     cudaMalloc(&orient, src->width * src->height * sizeof(float));
     //cudaMemcpyToSymbol(orient, &tmpOrientation, sizeof(float*));
 
@@ -409,10 +449,10 @@ void CudaGeneralHoughTransform::accumulateSource() {
     kernelConvertToGray<<<gridDim, blockDim>>>(deviceSrcData, srcGrayData, src->width, src->height);
     cudaDeviceSynchronize();
 
-    kernelProcessStep1<<<gridDim, blockDim>>>(srcGrayData, orient, src->width, src->height);
+    kernelProcessStep1<<<gridDim, blockDim>>>(srcGrayData, mag, orient, src->width, src->height);
     cudaDeviceSynchronize();
 
-    kernelProcessStep2<<<gridDim, blockDim>>>(srcGrayData, orient, entries, src->width, src->height, false);
+    kernelProcessStep2<<<gridDim, blockDim>>>(mag, orient, entries, src->width, src->height, false);
     cudaDeviceSynchronize();  
 
     // GrayImage* magThreshold = new GrayImage;
@@ -422,6 +462,7 @@ void CudaGeneralHoughTransform::accumulateSource() {
     cudaFree(srcGrayData);
     cudaFree(orient);
     cudaFree(deviceSrcData);
+    cudaFree(mag);
 }
 
 void CudaGeneralHoughTransform::saveOutput() {
