@@ -217,8 +217,11 @@ bool keepPixel(const float* magnitude, int i, int j, int width, int height, int 
         neighbourTwoi += 1;
     }
     
-    float neighbourOne = magnitude[neighbourOnej * width + neighbourOnei];
-    float neighbourTwo = magnitude[neighbourTwoj * width + neighbourTwoi];
+    float neighbourOne, neighbourTwo;
+    if (neighbourOnei < 0 || neighbourOnei >= width || neighbourOnej < 0 || neighbourOnej >= height) neighbourOne = 0.f;
+    else neighbourOne = magnitude[neighbourOnej * width + neighbourOnei];
+    if (neighbourTwoi < 0 || neighbourTwoi >= width || neighbourTwoj < 0 || neighbourTwoj >= height) neighbourTwo = 0.f;
+    else neighbourTwo = magnitude[neighbourTwoj * width + neighbourTwoi];
     float cur = magnitude[j * width + i];
     
     return (neighbourOne <= cur) && (neighbourTwo <= cur);
@@ -899,12 +902,12 @@ void CudaGeneralHoughTransform::accumulateSource() {
     float* orient;
     float* mag;
 
-    cudaMalloc(&deviceSrcData, 3 * src->width * src->height * sizeof(unsigned char));
-    cudaMalloc(&srcGrayData, src->width * src->height * sizeof(float));
-    cudaMemcpy(deviceSrcData, src->data, 3 * src->width * src->height * sizeof(unsigned char), cudaMemcpyHostToDevice);
+    cudaCheckError(cudaMalloc(&deviceSrcData, 3 * src->width * src->height * sizeof(unsigned char)));
+    cudaCheckError(cudaMalloc(&srcGrayData, src->width * src->height * sizeof(float)));
+    cudaCheckError(cudaMemcpy(deviceSrcData, src->data, 3 * src->width * src->height * sizeof(unsigned char), cudaMemcpyHostToDevice));
     //cudaMemcpyToSymbol(grayData, &srcGrayData, sizeof(float*));
-    cudaMalloc(&mag, src->width * src->height * sizeof(float));
-    cudaMalloc(&orient, src->width * src->height * sizeof(float));
+    cudaCheckError(cudaMalloc(&mag, src->width * src->height * sizeof(float)));
+    cudaCheckError(cudaMalloc(&orient, src->width * src->height * sizeof(float)));
     //cudaMemcpyToSymbol(orient, &tmpOrientation, sizeof(float*));
 
     dim3 blockDim(TPB_X, TPB_Y, 1);
@@ -912,20 +915,20 @@ void CudaGeneralHoughTransform::accumulateSource() {
                  (src->height + TPB_Y - 1) / TPB_Y, 1);
     
     kernelConvertToGray<<<gridDim, blockDim>>>(deviceSrcData, srcGrayData, src->width, src->height);
-    cudaDeviceSynchronize();
+    cudaCheckError(cudaDeviceSynchronize());
     // cudaFree(deviceSrcData);
 
     kernelProcessStep1<<<gridDim, blockDim>>>(srcGrayData, mag, orient, src->width, src->height);
     cudaCheckError(cudaDeviceSynchronize());
 
     kernelProcessStep2<<<gridDim, blockDim>>>(mag, orient, entries, src->width, src->height, false);
-    cudaDeviceSynchronize();  
+    cudaCheckError(cudaDeviceSynchronize());  
 
     // GrayImage* magThreshold = new GrayImage;
     // cudaMemcpyFromSymbol(magThreshold->data, grayData, src->width * src->height * sizeof(float), cudaMemcpyDeviceToHost);
 
     double startAccumulateTime = CycleTimer::currentSeconds();
-    accumulate(mag, orient, src->width, src->height, false, 1);
+    accumulate(mag, orient, src->width, src->height, false, 2);
     double endAccumulateTime = CycleTimer::currentSeconds();
     double totalAccumulateTime = endAccumulateTime - startAccumulateTime;
     printf("Accumulate:        %.4f ms\n", 1000.f * totalAccumulateTime);

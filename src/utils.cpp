@@ -133,8 +133,11 @@ bool keepPixel(const GrayImage* magnitude, int i, int j, int gradient) {
         neighbourTwoi += 1;
     }
     
-    float neighbourOne = magnitude->data[neighbourOnej * magnitude->width + neighbourOnei];
-    float neighbourTwo = magnitude->data[neighbourTwoj * magnitude->width + neighbourTwoi];
+    float neighbourOne, neighbourTwo;
+    if (neighbourOnei < 0 || neighbourOnei >= magnitude->width || neighbourOnej < 0 || neighbourOnej >= magnitude->height) neighbourOne = 0.f;
+    else neighbourOne = magnitude->data[neighbourOnej * magnitude->width + neighbourOnei];
+    if (neighbourTwoi < 0 || neighbourTwoi >= magnitude->width || neighbourTwoj < 0 || neighbourTwoj >= magnitude->height) neighbourTwo = 0.f;
+    else neighbourTwo = magnitude->data[neighbourTwoj * magnitude->width + neighbourTwoi];
     float cur = magnitude->data[j * magnitude->width + i];
     
     return (neighbourOne <= cur) && (neighbourTwo <= cur);
