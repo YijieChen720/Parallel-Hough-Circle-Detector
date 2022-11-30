@@ -604,6 +604,23 @@ __global__ void accumulate_kernel_3D(int* accumulator, float* edgePixels, float*
     }
 }
 
+// https://forums.developer.nvidia.com/t/how-to-use-atomiccas-to-implement-atomicadd-short-trouble-adapting-programming-guide-example/22712
+__device__ short atomicAddShort(short* address, short val)
+{
+    unsigned int *base_address = (unsigned int *) ((char *)address - ((size_t)address & 2));	//tera's revised version (showtopic=201975)
+    unsigned int long_val = ((size_t)address & 2) ? ((unsigned int)val << 16) : (unsigned short)val;
+    unsigned int long_old = atomicAdd(base_address, long_val);
+
+    if((size_t)address & 2) {
+        return (short)(long_old >> 16);
+    } else {
+        unsigned int overflow = ((long_old & 0xffff) + long_val) & 0xffff0000;
+        if (overflow)
+            atomicSub(base_address, overflow);
+        return (short)(long_old & 0xffff);
+    }
+}
+
 __global__ void accumulate_kernel_3D_sharedMemory(int* accumulator, float* edgePixels, float* srcOrient, int* blockStarts, int* blockEnds, int width, int height, int wblock, int hblock, rEntry* entries, int* startPos, int tplSize) {
     int blockIndex = blockIdx.x;
     int start = blockStarts[blockIndex];
@@ -631,7 +648,15 @@ __global__ void accumulate_kernel_3D_sharedMemory(int* accumulator, float* edgeP
 
     // dynamically allocate shared memory
     extern __shared__ int accumulatorSlice[];
-    
+    if (threadIdx.x == 0) {
+        for (int j = 0; j < hblock; j++) {
+            for (int i = 0; i < wblock; i++) {
+                accumulatorSlice[j * wblock + i] = 0;
+            }
+        }
+    }
+    __syncthreads();
+
     // access RTable and traverse all entries
     int startIdx = startPos[iSlice];
     int endIdx;
@@ -650,7 +675,7 @@ __global__ void accumulate_kernel_3D_sharedMemory(int* accumulator, float* edgeP
             //                        + xc / blockSize;
             // atomicAdd(accumulator + accumulatorIndex, 1);
             int accumulatorSliceIndex = yc / cuConstParams.blockSize * wblock + xc / cuConstParams.blockSize;
-            atomicAdd(accumulatorSlice + accumulatorSliceIndex , 1);
+            atomicAdd(accumulatorSlice + accumulatorSliceIndex, 1);
         }
     }
 
@@ -663,7 +688,7 @@ __global__ void accumulate_kernel_3D_sharedMemory(int* accumulator, float* edgeP
                                        + j * wblock
                                        + i;
                 int accumulatorSliceIndex = j * wblock + i;
-                accumulator[accumulatorIndex] += accumulatorSlice[accumulatorSliceIndex];
+                atomicAdd(accumulator + accumulatorIndex, accumulatorSlice[accumulatorSliceIndex]);
             }
         }
     }
