@@ -648,12 +648,13 @@ __global__ void accumulate_kernel_3D_sharedMemory(int* accumulator, float* edgeP
 
     // dynamically allocate shared memory
     extern __shared__ int accumulatorSlice[];
+    int threadCnt = end - start + 1;
+    int coverage = hblock * wblock / threadCnt;
+    int sStart = coverage * threadIdx.x;
+    int eEnd = sStart + coverage; 
+    for (int i = sStart; i < eEnd; i++) accumulatorSlice[i] = 0;
     if (threadIdx.x == 0) {
-        for (int j = 0; j < hblock; j++) {
-            for (int i = 0; i < wblock; i++) {
-                accumulatorSlice[j * wblock + i] = 0;
-            }
-        }
+        for (int i = coverage * threadCnt; i < wblock * hblock; i++) accumulatorSlice[i] = 0;
     }
     __syncthreads();
 
@@ -669,27 +670,26 @@ __global__ void accumulate_kernel_3D_sharedMemory(int* accumulator, float* edgeP
         int xc = col + round(r * s * cos(alpha + theta_r));
         int yc = row + round(r * s * sin(alpha + theta_r));
         if (xc >= 0 && xc < width && yc >= 0 && yc < height) {
-            // int accumulatorIndex = is * nRotationSlices * hblock * wblock
-            //                        + itheta * hblock * wblock
-            //                        + yc / blockSize * wblock
-            //                        + xc / blockSize;
-            // atomicAdd(accumulator + accumulatorIndex, 1);
             int accumulatorSliceIndex = yc / cuConstParams.blockSize * wblock + xc / cuConstParams.blockSize;
             atomicAdd(accumulatorSlice + accumulatorSliceIndex, 1);
         }
     }
 
     __syncthreads();
+    for (int i = sStart; i < eEnd; i++) {
+        int accumulatorIndex = is * cuConstParams.nRotationSlices * hblock * wblock
+                               + itheta * hblock * wblock
+                               + i;
+        int accumulatorSliceIndex = i;
+        atomicAdd(accumulator + accumulatorIndex, accumulatorSlice[accumulatorSliceIndex]);
+    }
     if (threadIdx.x == 0) {
-        for (int j = 0; j < hblock; j++) {
-            for (int i = 0; i < wblock; i++) {
-                int accumulatorIndex = is * cuConstParams.nRotationSlices * hblock * wblock
-                                       + itheta * hblock * wblock
-                                       + j * wblock
-                                       + i;
-                int accumulatorSliceIndex = j * wblock + i;
-                atomicAdd(accumulator + accumulatorIndex, accumulatorSlice[accumulatorSliceIndex]);
-            }
+        for (int i = coverage * threadCnt; i < wblock * hblock; i++) {
+            int accumulatorIndex = is * cuConstParams.nRotationSlices * hblock * wblock
+                                   + itheta * hblock * wblock
+                                   + i;
+            int accumulatorSliceIndex = i;
+            atomicAdd(accumulator + accumulatorIndex, accumulatorSlice[accumulatorSliceIndex]);
         }
     }
 }
