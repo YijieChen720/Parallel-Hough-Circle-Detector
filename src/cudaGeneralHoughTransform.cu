@@ -460,6 +460,47 @@ __global__ void accumulate_kernel_naive(int* accumulator, float* edgePixels, int
     }
 }
 
+__global__ void accumulate_kernel_naive_3D(int* accumulator, float* edgePixels, int numEdgePixels, float* srcOrient, int width, int height, int wblock, int hblock, rEntry* entries, int* startPos, int tplSize) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= numEdgePixels) return;
+
+    int pixelIndex = static_cast<int>(edgePixels[index]);
+    int row = pixelIndex / width;
+    int col = pixelIndex % width;
+    
+    int itheta = blockIdx.y;
+    int is = blockIdx.z;
+
+    float phi = srcOrient[pixelIndex]; // gradient direction in [0,360)
+    float theta = itheta * cuConstParams.deltaRotationAngle;
+    float theta_r = theta / 180.f * cuConstParams.PI;
+
+    // minus mean rotate back by theta
+    int iSlice = static_cast<int>(fmodf(phi - theta + 360, 360) / cuConstParams.deltaRotationAngle);
+    
+    float s = is * cuConstParams.deltaScaleRatio + cuConstParams.MINSCALE;
+
+    // access RTable and traverse all entries
+    int startIdx = startPos[iSlice];
+    int endIdx;
+    if (iSlice + 1 == cuConstParams.nRotationSlices) endIdx = tplSize;
+    else endIdx = startPos[iSlice + 1];
+    for (int idx = startIdx; idx < endIdx; idx++) {
+        rEntry entry = entries[idx];
+        float r = entry.r;
+        float alpha = entry.alpha;
+        int xc = col + round(r * s * cos(alpha + theta_r));
+        int yc = row + round(r * s * sin(alpha + theta_r));
+        if (xc >= 0 && xc < width && yc >= 0 && yc < height) {
+            int accumulatorIndex = is * cuConstParams.nRotationSlices * hblock * wblock
+                                   + itheta * hblock * wblock
+                                   + yc / cuConstParams.blockSize * wblock
+                                   + xc / cuConstParams.blockSize;
+            atomicAdd(accumulator + accumulatorIndex, 1);
+        }
+    }
+}
+
 __global__ void findCutoffs_kernel(float* edgePixels, int numEdgePixels, float* srcOrient, int threadsPerBlock, int* startIndex, int* numBlocksDevice) {
     int cur = 0;
     startIndex[0] = 0;
@@ -512,7 +553,7 @@ __global__ void fillIntervals_kernel(int* startIndex, int numEdgePixels, int thr
     }
 }
 
-__global__ void accumulate_kernel_better(int* accumulator, float* edgePixels, float* srcOrient, int* blockStarts, int* blockEnds, int width, int height, int wblock, int hblock, rEntry* entries, int* startPos, int tplSize) {
+__global__ void accumulate_kernel_binning (int* accumulator, float* edgePixels, float* srcOrient, int* blockStarts, int* blockEnds, int width, int height, int wblock, int hblock, rEntry* entries, int* startPos, int tplSize) {
     int blockIndex = blockIdx.x;
     int start = blockStarts[blockIndex];
     int end = blockEnds[blockIndex];
@@ -558,7 +599,7 @@ __global__ void accumulate_kernel_better(int* accumulator, float* edgePixels, fl
     }
 }
 
-__global__ void accumulate_kernel_3D(int* accumulator, float* edgePixels, float* srcOrient, int* blockStarts, int* blockEnds, int width, int height, int wblock, int hblock, rEntry* entries, int* startPos, int tplSize) {
+__global__ void accumulate_kernel_binning_3D(int* accumulator, float* edgePixels, float* srcOrient, int* blockStarts, int* blockEnds, int width, int height, int wblock, int hblock, rEntry* entries, int* startPos, int tplSize) {
     int blockIndex = blockIdx.x;
     int start = blockStarts[blockIndex];
     int end = blockEnds[blockIndex];
@@ -621,7 +662,7 @@ __device__ short atomicAddShort(short* address, short val)
     }
 }
 
-__global__ void accumulate_kernel_3D_sharedMemory(int* accumulator, float* edgePixels, float* srcOrient, int* blockStarts, int* blockEnds, int width, int height, int wblock, int hblock, rEntry* entries, int* startPos, int tplSize) {
+__global__ void accumulate_kernel_binning_3D_sharedMemory(int* accumulator, float* edgePixels, float* srcOrient, int* blockStarts, int* blockEnds, int width, int height, int wblock, int hblock, rEntry* entries, int* startPos, int tplSize) {
     int blockIndex = blockIdx.x;
     int start = blockStarts[blockIndex];
     int end = blockEnds[blockIndex];
@@ -720,7 +761,7 @@ __global__ void findmaxima_kernel(int* accumulator, Point* blockMaxima, int wblo
 }
 
 // srcThreshold, srcOrient: pointers to GPU memory address
-void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient, int width, int height, bool naive, int strategy) {
+void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient, int width, int height, bool naive, bool sort, int strategy) {
     int wblock = (width + params.blockSize - 1) / params.blockSize;
     int hblock = (height + params.blockSize - 1) / params.blockSize;
     
@@ -753,8 +794,46 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
         // Write to global CUDA memory atomically
         int threadsPerBlock = 32;
         int blocks = (numEdgePixels + threadsPerBlock - 1) / threadsPerBlock;
-        accumulate_kernel_naive<<<blocks, threadsPerBlock>>>(accumulator, edgePixels, numEdgePixels, srcOrient, width, height, wblock, hblock, entries, startPos, tpl->width * tpl->height);
+
+        switch (strategy) {
+            case 0: 
+                {
+                    accumulate_kernel_naive<<<blocks, threadsPerBlock>>>(accumulator, edgePixels, numEdgePixels, srcOrient, width, height, wblock, hblock, entries, startPos, tpl->width * tpl->height);
+                    cudaCheckError(cudaDeviceSynchronize());
+                }
+                break;
+            case 1:
+                {
+                    dim3 gridDim(blocks, params.nRotationSlices, params.nScaleSlices);
+                    accumulate_kernel_naive_3D<<<gridDim, threadsPerBlock>>>(accumulator, edgePixels, numEdgePixels, srcOrient, width, height, wblock, hblock, entries, startPos, tpl->width * tpl->height);
+                    cudaCheckError(cudaDeviceSynchronize());
+                }
+                break;
+            default:
+                printf("Please select strategy 0, 1\n");
+        }
+    } else if (sort) {
+        int threadsPerBlock = 32;
+        int blocks = (numEdgePixels + threadsPerBlock - 1) / threadsPerBlock;
+        thrust::sort(edgePixelsThrust, edgePixelsThrust + numEdgePixels, compare_pixel_by_orient(srcOrient));
         cudaCheckError(cudaDeviceSynchronize());
+        switch (strategy) {
+            case 0: 
+                {
+                    accumulate_kernel_naive<<<blocks, threadsPerBlock>>>(accumulator, edgePixels, numEdgePixels, srcOrient, width, height, wblock, hblock, entries, startPos, tpl->width * tpl->height);
+                    cudaCheckError(cudaDeviceSynchronize());
+                }
+                break;
+            case 1:
+                {
+                    dim3 gridDim(blocks, params.nRotationSlices, params.nScaleSlices);
+                    accumulate_kernel_naive_3D<<<gridDim, threadsPerBlock>>>(accumulator, edgePixels, numEdgePixels, srcOrient, width, height, wblock, hblock, entries, startPos, tpl->width * tpl->height);
+                    cudaCheckError(cudaDeviceSynchronize());
+                }
+                break;
+            default:
+                printf("Please select strategy 0, 1\n");
+        }
     } else {
         // (2) better approach: 
         //     a. put edge points into buckets by phi
@@ -792,7 +871,7 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
         switch (strategy) {
             case 0:
                 {
-                    accumulate_kernel_better<<<numBlocks, threadsPerBlock>>>(accumulator, edgePixels, srcOrient, blockStarts, blockEnds, width, height, wblock, hblock, entries, startPos, tpl->width * tpl->height);
+                    accumulate_kernel_binning<<<numBlocks, threadsPerBlock>>>(accumulator, edgePixels, srcOrient, blockStarts, blockEnds, width, height, wblock, hblock, entries, startPos, tpl->width * tpl->height);
                     cudaCheckError(cudaDeviceSynchronize());
                 }
                 break;
@@ -802,7 +881,7 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
                     //     a. put edge points into buckets by phi
                     //     b. go by same phi, then same theta, then same scale (3D kernel)
                     dim3 gridDim(numBlocks, params.nRotationSlices, params.nScaleSlices);
-                    accumulate_kernel_3D<<<gridDim, threadsPerBlock>>>(accumulator, edgePixels, srcOrient, blockStarts, blockEnds, width, height, wblock, hblock, entries, startPos, tpl->width * tpl->height);
+                    accumulate_kernel_binning_3D<<<gridDim, threadsPerBlock>>>(accumulator, edgePixels, srcOrient, blockStarts, blockEnds, width, height, wblock, hblock, entries, startPos, tpl->width * tpl->height);
                     cudaCheckError(cudaDeviceSynchronize());
                 }
                 break;
@@ -811,7 +890,7 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
                     // shared memory of accumulator slice
                     dim3 gridDim(numBlocks, params.nRotationSlices, params.nScaleSlices);
                     int sharedSize = hblock * wblock * sizeof(int);
-                    accumulate_kernel_3D_sharedMemory<<<gridDim, threadsPerBlock, sharedSize>>>(accumulator, edgePixels, srcOrient, blockStarts, blockEnds, width, height, wblock, hblock, entries, startPos, tpl->width * tpl->height);
+                    accumulate_kernel_binning_3D_sharedMemory<<<gridDim, threadsPerBlock, sharedSize>>>(accumulator, edgePixels, srcOrient, blockStarts, blockEnds, width, height, wblock, hblock, entries, startPos, tpl->width * tpl->height);
                     cudaCheckError(cudaDeviceSynchronize());
                 }
                 break;
@@ -953,7 +1032,7 @@ void CudaGeneralHoughTransform::accumulateSource() {
     // cudaMemcpyFromSymbol(magThreshold->data, grayData, src->width * src->height * sizeof(float), cudaMemcpyDeviceToHost);
 
     double startAccumulateTime = CycleTimer::currentSeconds();
-    accumulate(mag, orient, src->width, src->height, false, 2);
+    accumulate(mag, orient, src->width, src->height, false, false, 1);
     double endAccumulateTime = CycleTimer::currentSeconds();
     double totalAccumulateTime = endAccumulateTime - startAccumulateTime;
     printf("Accumulate:        %.4f ms\n", 1000.f * totalAccumulateTime);
