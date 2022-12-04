@@ -14,6 +14,9 @@
 #include <thrust/copy.h>
 #include <thrust/extrema.h>
 #include <thrust/sort.h>
+#include <thrust/binary_search.h>
+#include <thrust/device_vector.h>
+#include <thrust/functional.h>
 
 #define TPB_X 32
 #define TPB_Y 32
@@ -270,37 +273,6 @@ __global__ void kernelConvertToGray(const unsigned char* data, float* grayData, 
     grayData[index] = (data[3 * index] + data[3 * index + 1] + data[3 * index + 2]) / 3.f;
 }
 
-// parallel convolveX, convolveY
-// parallel magnitude, orientaion
-// __global__ void kernelProcessStep1Updated(int width, int height){
-//     int indexX = blockIdx.x * blockDim.x + threadIdx.x;
-//     int indexY = blockIdx.y * blockDim.y + threadIdx.y;
-//     int index = (indexY * blockDim.x * TPB_X + indexX)/2;
-//     indexX = index % width;
-//     indexY = index / width;
-//     int localIdx = threadIdx.y * TPB_X + threadIdx.x;
-
-//     if (indexX >= width || indexY >= height) return;
-
-//     __shared__ float gradientX[TPB/2];
-//     __shared__ float gradientY[TPB/2];
-//     int sobel[3][3] = {{1, 0, -1}, {2, 0, -2}, {1, 0, -1}};
-//     if (localIdx%2==0){
-//         convolve(sobel, grayData, gradientX, width, height, indexX, indexY);
-//     }
-//     else{
-//         convolve(sobel, grayData, gradientY, width, height, indexX, indexY);
-//     }
-//     __syncthreads();
-
-//     if (localIdx%2==0){
-//         magnitude(gradientX, gradientY, grayData, index, localIdx/2);
-//     }
-//     else{
-//         orientation(gradientX, gradientY, orient, index, localIdx/2);
-//     }
-// }
-
 __global__ void kernelProcessStep1(float* grayData, float* mag, float* orient, int width, int height){
     int indexX = blockIdx.x * blockDim.x + threadIdx.x;
     int indexY = blockIdx.y * blockDim.y + threadIdx.y;
@@ -352,31 +324,6 @@ __global__ void kernelProcessStep2(float* mag, float* orient, rEntry* entries, i
     }
 }
 
-__global__ void processRTable(rEntry* entries, int* startPos, int width, int height){
-    int i = 0;
-    for (i = 0; i < width * height; i++){
-        if (entries[i].iSlice >= 0) break;
-    }
-    while(i < width * height){
-        if (i==0) {
-            for (int j = 0; j < entries[0].iSlice+1; j++){
-                startPos[j] = i;
-            }
-            i++;
-            continue;
-        }
-        while (i < width * height && entries[i].iSlice == entries[i-1].iSlice) {i++;}
-        for (int j = entries[i-1].iSlice+1; j < entries[i].iSlice+1; j++){
-            startPos[j] = i;
-        }
-        i++;
-    }
-    for (int j = entries[i-2].iSlice+1; j < cuConstParams.nRotationSlices; j++){
-        startPos[j] = width * height;
-    }
-    // printf("startPos: %d %d %d %d %d\n", startPos[0], startPos[1], startPos[2], startPos[3], startPos[4]);
-    // printf("startPos: %d %d\n", startPos[70], startPos[71]);
-}
 
 struct is_edge
 {
@@ -942,6 +889,7 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
 // 4. parallel magnitude & orientation
 void CudaGeneralHoughTransform::processTemplate() {
     printf("----------Start processing template----------\n");
+    double startAllocateTime = CycleTimer::currentSeconds();
     unsigned char* deviceTplData;
     float* tplGrayData;
     float* mag;
@@ -955,19 +903,25 @@ void CudaGeneralHoughTransform::processTemplate() {
     cudaMalloc(&entries, tpl->width * tpl->height * sizeof(rEntry));
     cudaMalloc(&mag, tpl->width * tpl->height * sizeof(float));
     cudaMalloc(&orient, tpl->width * tpl->height * sizeof(float));
+    double endAllocateTime = CycleTimer::currentSeconds();
 
     dim3 blockDim(TPB_X, TPB_Y, 1);
     dim3 gridDim((tpl->width + TPB_X - 1) / TPB_X, 
                  (tpl->height + TPB_Y - 1) / TPB_Y, 1);
+    double startGrayTime = CycleTimer::currentSeconds();
     kernelConvertToGray<<<gridDim, blockDim>>>(deviceTplData, tplGrayData, tpl->width, tpl->height);
     cudaDeviceSynchronize();
+    double endGrayTime = CycleTimer::currentSeconds();
+
     // GrayImage* grayTpl = new GrayImage;
     // grayTpl->setGrayImage(tpl->width, tpl->height);
     // cudaMemcpy(grayTpl->data, tplGrayData, tpl->width * tpl->height * sizeof(float), cudaMemcpyDeviceToHost);
     // writeGrayPPMImage(grayTpl, "gray1.ppm");
 
+    double startStep1Time = CycleTimer::currentSeconds();
     kernelProcessStep1<<<gridDim, blockDim>>>(tplGrayData, mag, orient, tpl->width, tpl->height);
     cudaDeviceSynchronize();
+    double endStep1Time = CycleTimer::currentSeconds();
 
     // GrayImage* magTpl = new GrayImage;
     // magTpl->setGrayImage(tpl->width, tpl->height);
@@ -978,70 +932,114 @@ void CudaGeneralHoughTransform::processTemplate() {
     // cudaMemcpy(orientTpl->data, orient, tpl->width * tpl->height * sizeof(float), cudaMemcpyDeviceToHost);
     // writeGrayPPMImage(orientTpl, "orient1.ppm");
 
+    double startStep2Time = CycleTimer::currentSeconds();
     kernelProcessStep2<<<gridDim, blockDim>>>(mag, orient, entries, tpl->width, tpl->height, true);
     cudaDeviceSynchronize();  
+    double endStep2Time = CycleTimer::currentSeconds();
 
-    // cudaMemcpy(magTpl->data, mag, tpl->width * tpl->height * sizeof(float), cudaMemcpyDeviceToHost);
-    // writeGrayPPMImage(magTpl, "magThreshold1.ppm");
-
+    double startSortTime = CycleTimer::currentSeconds();
     thrust::device_ptr<rEntry> entriesThrust = thrust::device_pointer_cast(entries); 
-
     thrust::sort(entriesThrust, entriesThrust + tpl->width * tpl->height, compare_entry_by_rotation());
-    cudaDeviceSynchronize(); 
+    double endSortTime = CycleTimer::currentSeconds();
 
+    double startRTableTime = CycleTimer::currentSeconds();
     cudaMalloc(&startPos, params.nRotationSlices * sizeof(int));
-    processRTable<<<1, 1>>>(entries, startPos, tpl->width, tpl->height);
-    
+    thrust::device_vector<rEntry> rTableThrust(entriesThrust, entriesThrust + tpl->width * tpl->height);
+    thrust::device_vector<rEntry> values(params.nRotationSlices);
+    for (int i = 0; i < params.nRotationSlices; i++){
+        values[i] = (struct rEntry){i, 0.f, 0.f};
+    }
+    thrust::device_vector<int> posThrust(params.nRotationSlices);
+    thrust::lower_bound(rTableThrust.begin(), rTableThrust.end(), values.begin(), values.end(), posThrust.begin(), compare_entry_by_rotation());
+
+    int* posPtr = thrust::raw_pointer_cast(&posThrust[0]);
+    cudaMemcpy(startPos, posPtr, params.nRotationSlices * sizeof(int), cudaMemcpyHostToDevice);
+
+    double endRTableTime = CycleTimer::currentSeconds();
+
     // memory deallocation
-    cudaCheckError(cudaFree(deviceTplData));
-    cudaCheckError(cudaFree(orient));
-    cudaCheckError(cudaFree(tplGrayData));
-    cudaCheckError(cudaFree(mag));
+    double startFreeTime = CycleTimer::currentSeconds();
+    cudaFree(deviceTplData);
+    cudaFree(orient);
+    cudaFree(tplGrayData);
+    cudaFree(mag);
+    double endFreeTime = CycleTimer::currentSeconds();
+
+    double allocateTime = endAllocateTime - startAllocateTime;
+    double grayTime = endGrayTime - startGrayTime;
+    double step1Time = endStep1Time - startStep1Time;
+    double step2Time = endStep2Time - startStep2Time;
+    double sortTime = endSortTime - startSortTime;
+    double RTableTime = endRTableTime - startRTableTime;
+    double freeTime = endFreeTime - startFreeTime;
+    printf("Allocate memory:   %.4f ms\n", 1000.f * allocateTime);
+    printf("Convert to Gray:   %.4f ms\n", 1000.f * grayTime);
+    printf("Step1:             %.4f ms\n", 1000.f * step1Time);
+    printf("Step2:             %.4f ms\n", 1000.f * step2Time);
+    printf("Sort:              %.4f ms\n", 1000.f * sortTime);
+    printf("Process R table:   %.4f ms\n", 1000.f * RTableTime);
+    printf("Free Memory:       %.4f ms\n", 1000.f * freeTime);
+    
     printf("----------End Processing Template----------\n");
 }
 
 void CudaGeneralHoughTransform::accumulateSource() {
+    double startAllocateTime = CycleTimer::currentSeconds();
     unsigned char* deviceSrcData;
     float* srcGrayData;
     float* orient;
     float* mag;
 
-    cudaCheckError(cudaMalloc(&deviceSrcData, 3 * src->width * src->height * sizeof(unsigned char)));
-    cudaCheckError(cudaMalloc(&srcGrayData, src->width * src->height * sizeof(float)));
-    cudaCheckError(cudaMemcpy(deviceSrcData, src->data, 3 * src->width * src->height * sizeof(unsigned char), cudaMemcpyHostToDevice));
-    //cudaMemcpyToSymbol(grayData, &srcGrayData, sizeof(float*));
-    cudaCheckError(cudaMalloc(&mag, src->width * src->height * sizeof(float)));
-    cudaCheckError(cudaMalloc(&orient, src->width * src->height * sizeof(float)));
-    //cudaMemcpyToSymbol(orient, &tmpOrientation, sizeof(float*));
+    cudaMalloc(&deviceSrcData, 3 * src->width * src->height * sizeof(unsigned char));
+    cudaMalloc(&srcGrayData, src->width * src->height * sizeof(float));
+    cudaMemcpy(deviceSrcData, src->data, 3 * src->width * src->height * sizeof(unsigned char), cudaMemcpyHostToDevice);
+    cudaMalloc(&mag, src->width * src->height * sizeof(float));
+    cudaMalloc(&orient, src->width * src->height * sizeof(float));
+
+    double endAllocateTime = CycleTimer::currentSeconds();
 
     dim3 blockDim(TPB_X, TPB_Y, 1);
     dim3 gridDim((src->width + TPB_X - 1) / TPB_X, 
                  (src->height + TPB_Y - 1) / TPB_Y, 1);
     
+    double startGrayTime = CycleTimer::currentSeconds();
     kernelConvertToGray<<<gridDim, blockDim>>>(deviceSrcData, srcGrayData, src->width, src->height);
-    cudaCheckError(cudaDeviceSynchronize());
-    // cudaFree(deviceSrcData);
+    cudaDeviceSynchronize();
+    double endGrayTime = CycleTimer::currentSeconds();
 
+    double startStep1Time = CycleTimer::currentSeconds();
     kernelProcessStep1<<<gridDim, blockDim>>>(srcGrayData, mag, orient, src->width, src->height);
-    cudaCheckError(cudaDeviceSynchronize());
+    cudaDeviceSynchronize();
+    double endStep1Time = CycleTimer::currentSeconds();
 
+    double startStep2Time = CycleTimer::currentSeconds();
     kernelProcessStep2<<<gridDim, blockDim>>>(mag, orient, entries, src->width, src->height, false);
-    cudaCheckError(cudaDeviceSynchronize());  
-
-    // GrayImage* magThreshold = new GrayImage;
-    // cudaMemcpyFromSymbol(magThreshold->data, grayData, src->width * src->height * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaDeviceSynchronize();  
+    double endStep2Time = CycleTimer::currentSeconds();
 
     double startAccumulateTime = CycleTimer::currentSeconds();
     accumulate(mag, orient, src->width, src->height, false, false, 1);
     double endAccumulateTime = CycleTimer::currentSeconds();
+    double allocateTime = endAllocateTime - startAllocateTime;
+    double grayTime = endGrayTime - startGrayTime;
+    double step1Time = endStep1Time - startStep1Time;
+    double step2Time = endStep2Time - startStep2Time;
     double totalAccumulateTime = endAccumulateTime - startAccumulateTime;
+    printf("Allocate memory:   %.4f ms\n", 1000.f * allocateTime);
+    printf("Convert to Gray:   %.4f ms\n", 1000.f * grayTime);
+    printf("Step1:             %.4f ms\n", 1000.f * step1Time);
+    printf("Step2:             %.4f ms\n", 1000.f * step2Time);
     printf("Accumulate:        %.4f ms\n", 1000.f * totalAccumulateTime);
     
     // memory deallocation
+    double startFreeTime = CycleTimer::currentSeconds();
     cudaFree(srcGrayData);
     cudaFree(orient);
     cudaFree(deviceSrcData);
     cudaFree(mag);
+    double endFreeTime = CycleTimer::currentSeconds();
+    double freeTime = endFreeTime - startFreeTime;
+    printf("Free Memory:       %.4f ms\n", 1000.f * freeTime);
 }
 
 void CudaGeneralHoughTransform::saveOutput() {
