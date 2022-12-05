@@ -984,6 +984,7 @@ void CudaGeneralHoughTransform::processTemplate() {
 }
 
 void CudaGeneralHoughTransform::accumulateSource() {
+    printf("----------Start processing and accumulating source----------\n");
     double startAllocateTime = CycleTimer::currentSeconds();
     unsigned char* deviceSrcData;
     float* srcGrayData;
@@ -1018,7 +1019,7 @@ void CudaGeneralHoughTransform::accumulateSource() {
     double endStep2Time = CycleTimer::currentSeconds();
 
     double startAccumulateTime = CycleTimer::currentSeconds();
-    accumulate(mag, orient, src->width, src->height, false, false, 1);
+    accumulate(mag, orient, src->width, src->height, false, true, 1);
     double endAccumulateTime = CycleTimer::currentSeconds();
     double allocateTime = endAllocateTime - startAllocateTime;
     double grayTime = endGrayTime - startGrayTime;
@@ -1040,6 +1041,7 @@ void CudaGeneralHoughTransform::accumulateSource() {
     double endFreeTime = CycleTimer::currentSeconds();
     double freeTime = endFreeTime - startFreeTime;
     printf("Free Memory:       %.4f ms\n", 1000.f * freeTime);
+    printf("----------End processing and accumulating source----------\n");
 }
 
 void CudaGeneralHoughTransform::saveOutput() {

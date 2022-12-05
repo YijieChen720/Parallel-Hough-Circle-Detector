@@ -32,12 +32,16 @@ void SeqGeneralHoughTransform::setup() {
 }
 
 void SeqGeneralHoughTransform::processTemplate() {
+    printf("----------Start processing template----------\n");
     // convert template to gray image
+    double startGrayTime = CycleTimer::currentSeconds();
     GrayImage* grayTpl = new GrayImage;
     convertToGray(tpl, grayTpl);
+    double endGrayTime = CycleTimer::currentSeconds();
     // writeGrayPPMImage(grayTpl, "gray.ppm");
 
     // apply sobel_x -> gradient in x
+    double startStep1Time = CycleTimer::currentSeconds();
     std::vector<std::vector<int>> sobelX = {{1, 0, -1}, {2, 0, -2}, {1, 0, -1}};
     GrayImage* gradientX = new GrayImage;
     convolve(sobelX, grayTpl, gradientX);
@@ -58,9 +62,11 @@ void SeqGeneralHoughTransform::processTemplate() {
     // orientation in [0, 360)
     GrayImage* orient = new GrayImage;
     orientation(gradientX, gradientY, orient);
+    double endStep1Time = CycleTimer::currentSeconds();
     // writeGrayPPMImage(orient, "orient.ppm");
 
     // apply non-maximal supression to supress thick edges
+    double startStep2Time = CycleTimer::currentSeconds();
     GrayImage* magSupressed = new GrayImage;
     edgenms(mag, orient, magSupressed);
     // writeGrayPPMImage(magSupressed, "magSupressed.ppm");
@@ -73,23 +79,41 @@ void SeqGeneralHoughTransform::processTemplate() {
     // update R table using gradient (Phi) and image center
     // also update centerX and centerY
     createRTable(orient, magThreshold);
-    
+    double endStep2Time = CycleTimer::currentSeconds();
+
     // memory deallocation
+    double startFreeTime = CycleTimer::currentSeconds();
     delete grayTpl;
     delete gradientX;
     delete gradientY;
     delete mag;
     delete orient;
     delete magThreshold;
+    double endFreeTime = CycleTimer::currentSeconds();
+
+    double grayTime = endGrayTime - startGrayTime;
+    double step1Time = endStep1Time - startStep1Time;
+    double step2Time = endStep2Time - startStep2Time;
+    double freeTime = endFreeTime - startFreeTime;
+    printf("Convert to Gray:   %.4f ms\n", 1000.f * grayTime);
+    printf("Step1:             %.4f ms\n", 1000.f * step1Time);
+    printf("Step2:             %.4f ms\n", 1000.f * step2Time);
+    printf("Free Memory:       %.4f ms\n", 1000.f * freeTime);
+
+    printf("----------End Processing Template----------\n");
 }
 
 void SeqGeneralHoughTransform::accumulateSource() {
+    printf("----------Start processing and accumulating source----------\n");
     // -------Reuse from processTemplate-------
     // convert source to gray image
+    double startGrayTime = CycleTimer::currentSeconds();
     GrayImage* graySrc = new GrayImage;
     convertToGray(src, graySrc);
+    double endGrayTime = CycleTimer::currentSeconds();
 
     // apply sobel_x -> grayscale image x
+    double startStep1Time = CycleTimer::currentSeconds();
     std::vector<std::vector<int>> sobelX = {{1, 0, -1}, {2, 0, -2}, {1, 0, -1}};
     GrayImage* gradientX = new GrayImage;
     convolve(sobelX, graySrc, gradientX);
@@ -106,14 +130,17 @@ void SeqGeneralHoughTransform::accumulateSource() {
     // grascale gradient = (np.degrees(np.arctan2(image_y,image_x))+360)%360
     GrayImage* orient = new GrayImage;
     orientation(gradientX, gradientY, orient);
+    double endStep1Time = CycleTimer::currentSeconds();
 
     // apply non-maximal supression to supress thick edges 
+    double startStep2Time = CycleTimer::currentSeconds();
     GrayImage* magSupressed = new GrayImage;
     edgenms(mag, orient, magSupressed);
 
     // apply a threshold to get a binary image (255 is edge)
     GrayImage* magThreshold = new GrayImage;
     threshold(magSupressed, magThreshold, THRESHOLD);
+    double endStep2Time = CycleTimer::currentSeconds();
     // -------Reuse from processTemplate ends-------
 
     double startAccumulateTime = CycleTimer::currentSeconds();
@@ -126,7 +153,6 @@ void SeqGeneralHoughTransform::accumulateSource() {
     std::vector<std::vector<Point>> blockMaxima(hblock, std::vector<Point>(wblock, (struct Point){0, 0, 0, 0.f, 0.f}));
 
     // Each edge pixel vote
-    printf("------Start calculating accumulator-------\n");
     int cnt = 0;
     int _max = 0;
     for (int j = 0 ; j < height; j++) {
@@ -168,9 +194,8 @@ void SeqGeneralHoughTransform::accumulateSource() {
             }
         }
     }
-    printf("max value in accumulator: %d\n", _max);
-    printf("------End calculating accumulator-------\n");
-    printf("edge pixel cnt: %d\n", cnt);
+    printf("----Edge pixel cnt:        %d\n", cnt);
+    printf("----Edge pixel percent(%%): %f\n", (float)cnt / (width * height) * 100);
 
     // find local maxima
     int maximaThres = round(_max * thresRatio);
@@ -184,16 +209,28 @@ void SeqGeneralHoughTransform::accumulateSource() {
         }
     }
     double endAccumulateTime = CycleTimer::currentSeconds();
-    double totalAccumulateTime = endAccumulateTime - startAccumulateTime;
-    printf("Accumulate:        %.4f ms\n", 1000.f * totalAccumulateTime);
 
     // memory deallocation
+    double startFreeTime = CycleTimer::currentSeconds();
     delete graySrc;
     delete gradientX;
     delete gradientY;
     delete mag;
     delete orient;
     delete magThreshold;
+    double endFreeTime = CycleTimer::currentSeconds();
+    
+    double grayTime = endGrayTime - startGrayTime;
+    double step1Time = endStep1Time - startStep1Time;
+    double step2Time = endStep2Time - startStep2Time;
+    double totalAccumulateTime = endAccumulateTime - startAccumulateTime;
+    double freeTime = endFreeTime - startFreeTime;
+    printf("Convert to Gray:   %.4f ms\n", 1000.f * grayTime);
+    printf("Step1:             %.4f ms\n", 1000.f * step1Time);
+    printf("Step2:             %.4f ms\n", 1000.f * step2Time);
+    printf("Accumulate:        %.4f ms\n", 1000.f * totalAccumulateTime);
+    printf("Free Memory:       %.4f ms\n", 1000.f * freeTime);
+    printf("----------End processing and accumulating source----------\n");
 }
 
 void SeqGeneralHoughTransform::saveOutput() {
