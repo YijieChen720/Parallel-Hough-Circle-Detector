@@ -16,7 +16,7 @@ public:
     
     void processTemplate() override;
 
-    void accumulateSource() override;
+    void accumulateSource(bool naive, bool sort, bool is1D) override;
 
     void saveOutput() override;
 

@@ -983,7 +983,7 @@ void CudaGeneralHoughTransform::processTemplate() {
     printf("----------End Processing Template----------\n");
 }
 
-void CudaGeneralHoughTransform::accumulateSource() {
+void CudaGeneralHoughTransform::accumulateSource(bool naive, bool sort, bool is1D) {
     printf("----------Start processing and accumulating source----------\n");
     double startAllocateTime = CycleTimer::currentSeconds();
     unsigned char* deviceSrcData;
@@ -1019,7 +1019,8 @@ void CudaGeneralHoughTransform::accumulateSource() {
     double endStep2Time = CycleTimer::currentSeconds();
 
     double startAccumulateTime = CycleTimer::currentSeconds();
-    accumulate(mag, orient, src->width, src->height, false, true, 1);
+    int dimension = is1D ? 0 : 1;
+    accumulate(mag, orient, src->width, src->height, naive, sort, dimension);
     double endAccumulateTime = CycleTimer::currentSeconds();
     double allocateTime = endAllocateTime - startAllocateTime;
     double grayTime = endGrayTime - startGrayTime;

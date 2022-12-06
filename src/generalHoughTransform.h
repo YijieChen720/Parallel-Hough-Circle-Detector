@@ -10,7 +10,7 @@ public:
 
     virtual void processTemplate() = 0;
 
-    virtual void accumulateSource() = 0;
+    virtual void accumulateSource(bool naive, bool sort, bool is1D) = 0;
 
     virtual void saveOutput() = 0;
 

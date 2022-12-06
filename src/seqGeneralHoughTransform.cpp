@@ -103,7 +103,7 @@ void SeqGeneralHoughTransform::processTemplate() {
     printf("----------End Processing Template----------\n");
 }
 
-void SeqGeneralHoughTransform::accumulateSource() {
+void SeqGeneralHoughTransform::accumulateSource(bool naive, bool sort, bool is1D) {
     printf("----------Start processing and accumulating source----------\n");
     // -------Reuse from processTemplate-------
     // convert source to gray image
