@@ -644,6 +644,9 @@ __global__ void accumulate_kernel_binning_3D_sharedMemory(int* accumulator, floa
     if (threadIdx.x == 0) {
         for (int i = coverage * threadCnt; i < wblock * hblock; i++) accumulatorSlice[i] = 0;
     }
+
+    // __shared__ int cnt;
+    // if (threadIdx.x == 0) cnt = 0;
     __syncthreads();
 
     // access RTable and traverse all entries
@@ -660,10 +663,12 @@ __global__ void accumulate_kernel_binning_3D_sharedMemory(int* accumulator, floa
         if (xc >= 0 && xc < width && yc >= 0 && yc < height) {
             int accumulatorSliceIndex = yc / cuConstParams.blockSize * wblock + xc / cuConstParams.blockSize;
             atomicAdd(accumulatorSlice + accumulatorSliceIndex, 1);
+            // atomicAdd(&cnt, 1);
         }
     }
 
     __syncthreads();
+    // if (threadIdx.x == 0) printf("%d\n", cnt);
     for (int i = sStart; i < eEnd; i++) {
         int accumulatorIndex = is * cuConstParams.nRotationSlices * hblock * wblock
                                + itheta * hblock * wblock
@@ -773,9 +778,13 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
                 break;
             case 1:
                 {
+                    double startKernelTime = CycleTimer::currentSeconds();
                     dim3 gridDim(blocks, params.nRotationSlices, params.nScaleSlices);
                     accumulate_kernel_naive_3D<<<gridDim, threadsPerBlock>>>(accumulator, edgePixels, numEdgePixels, srcOrient, width, height, wblock, hblock, entries, startPos, tpl->width * tpl->height);
                     cudaCheckError(cudaDeviceSynchronize());
+                    double endKernelTime = CycleTimer::currentSeconds();
+                    double kernelTime = endKernelTime - startKernelTime;
+                    printf("Kernel:            %.4f ms\n", 1000.f * kernelTime);
                 }
                 break;
             default:
@@ -790,6 +799,7 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
         thrust::sort(edgePixelsThrust, edgePixelsThrust + numEdgePixels, compare_pixel_by_orient(srcOrient));
         cudaCheckError(cudaDeviceSynchronize());
         
+        double startBinningTime = CycleTimer::currentSeconds();
         // traverse sorted edge pixels and find the seperation points O(N)
         // Possible optimization: binary search O(logN) to find all the seperation points (72), can parallel the bineary search
         // Use 1 kernel to calculate the following:
@@ -806,6 +816,7 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
         int numBlocks;
         cudaMemcpy(&numBlocks, numBlocksDevice, sizeof(int), cudaMemcpyDeviceToHost); 
         cudaFree(numBlocksDevice);
+        printf("num blocks: %d\n", numBlocks);
 
         // allocate int[num of blocks] x2 for start and end index of each block
         int* blockStarts;
@@ -814,6 +825,9 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
         cudaMalloc(&blockEnds, sizeof(int) * numBlocks);
         fillIntervals_kernel<<<1, 1>>>(startIndex, numEdgePixels, threadsPerBlock, blockStarts, blockEnds);
         cudaCheckError(cudaDeviceSynchronize());
+        double endBinningTime = CycleTimer::currentSeconds();
+        double binningTime = endBinningTime - startBinningTime;
+        printf("Binning:           %.4f ms\n", 1000.f * binningTime);
 
         switch (strategy) {
             case 0:
@@ -824,21 +838,29 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
                 break;
             case 1:
                 {
+                    double startKernelTime = CycleTimer::currentSeconds();
                     // (3) more parallelism: 
                     //     a. put edge points into buckets by phi
                     //     b. go by same phi, then same theta, then same scale (3D kernel)
                     dim3 gridDim(numBlocks, params.nRotationSlices, params.nScaleSlices);
                     accumulate_kernel_binning_3D<<<gridDim, threadsPerBlock>>>(accumulator, edgePixels, srcOrient, blockStarts, blockEnds, width, height, wblock, hblock, entries, startPos, tpl->width * tpl->height);
                     cudaCheckError(cudaDeviceSynchronize());
+                    double endKernelTime = CycleTimer::currentSeconds();
+                    double kernelTime = endKernelTime - startKernelTime;
+                    printf("Kernel:            %.4f ms\n", 1000.f * kernelTime);
                 }
                 break;
             case 2:
                 {
+                    double startKernelTime = CycleTimer::currentSeconds();
                     // shared memory of accumulator slice
                     dim3 gridDim(numBlocks, params.nRotationSlices, params.nScaleSlices);
                     int sharedSize = hblock * wblock * sizeof(int);
                     accumulate_kernel_binning_3D_sharedMemory<<<gridDim, threadsPerBlock, sharedSize>>>(accumulator, edgePixels, srcOrient, blockStarts, blockEnds, width, height, wblock, hblock, entries, startPos, tpl->width * tpl->height);
                     cudaCheckError(cudaDeviceSynchronize());
+                    double endKernelTime = CycleTimer::currentSeconds();
+                    double kernelTime = endKernelTime - startKernelTime;
+                    printf("Kernel:            %.4f ms\n", 1000.f * kernelTime);
                 }
                 break;
             default:
