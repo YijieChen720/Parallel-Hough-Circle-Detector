@@ -38,43 +38,36 @@ void SeqGeneralHoughTransform::processTemplate() {
     GrayImage* grayTpl = new GrayImage;
     convertToGray(tpl, grayTpl);
     double endGrayTime = CycleTimer::currentSeconds();
-    // writeGrayPPMImage(grayTpl, "gray.ppm");
 
     // apply sobel_x -> gradient in x
     double startStep1Time = CycleTimer::currentSeconds();
     std::vector<std::vector<int>> sobelX = {{1, 0, -1}, {2, 0, -2}, {1, 0, -1}};
     GrayImage* gradientX = new GrayImage;
     convolve(sobelX, grayTpl, gradientX);
-    // writeGrayPPMImage(gradientX, "gx.ppm");
 
     // apply soble_y -> gradient in y
     std::vector<std::vector<int>> sobelY = {{1, 2, 1}, {0, 0, 0}, {-1, -2, -1}};
     GrayImage* gradientY = new GrayImage;
     convolve(sobelY, grayTpl, gradientY);
-    // writeGrayPPMImage(gradientY, "gy.ppm");
 
     // grascale magnitude = sqrt(square(x) + square(y))
     GrayImage* mag = new GrayImage;
     magnitude(gradientX, gradientY, mag);
-    // writeGrayPPMImage(mag, "mag.ppm");
 
     // grascale orientation = (np.degrees(np.arctan2(image_y,image_x))+360)%360
     // orientation in [0, 360)
     GrayImage* orient = new GrayImage;
     orientation(gradientX, gradientY, orient);
     double endStep1Time = CycleTimer::currentSeconds();
-    // writeGrayPPMImage(orient, "orient.ppm");
 
     // apply non-maximal supression to supress thick edges
     double startStep2Time = CycleTimer::currentSeconds();
     GrayImage* magSupressed = new GrayImage;
     edgenms(mag, orient, magSupressed);
-    // writeGrayPPMImage(magSupressed, "magSupressed.ppm");
 
     // apply a threshold to get a binary image (255 is edge)
     GrayImage* magThreshold = new GrayImage;
     threshold(magSupressed, magThreshold, THRESHOLD);
-    // writeGrayPPMImage(magThreshold, "threshold.ppm");
 
     // update R table using gradient (Phi) and image center
     // also update centerX and centerY
@@ -176,7 +169,6 @@ void SeqGeneralHoughTransform::accumulateSource(bool naive, bool sort, bool is1D
                             int xc = i + round(r * s * cos(alpha + theta_r));
                             int yc = j + round(r * s * sin(alpha + theta_r));
                             if (xc >= 0 && xc < width && yc >= 0 && yc < height){
-                                // use block here? too fine grained for pixel level
                                 accumulator[is][itheta][yc/blockSize][xc/blockSize]++;
                                 // find maximum for each block
                                 if (accumulator[is][itheta][yc/blockSize][xc/blockSize] > blockMaxima[yc/blockSize][xc/blockSize].hits){
@@ -356,7 +348,4 @@ void SeqGeneralHoughTransform::createRTable(const GrayImage* orientation, const 
             }
         }
     }
-    // for (int i = 0; i < nRotationSlices; i++) {
-        // std::cout<<"slice: "<<i<<", entries: "<<rTable[i].size()<<std::endl;
-    // }
 }

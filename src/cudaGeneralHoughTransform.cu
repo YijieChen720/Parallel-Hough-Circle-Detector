@@ -108,10 +108,6 @@ void CudaGeneralHoughTransform::setup() {
 
 __device__ __inline__
 void convolve(int filter[3][3], const float* source, float* result, int width, int height, int i, int j, int localIdx) {
-    // if (i == 0 && j == 0 && (filter.size() != 3 || filter[0].size() != 3)) {
-    //     std::cerr << "ERROR: convolve() only supports 3x3 filter.\n";
-    //     return;
-    // }
     float tmp = 0.f;
     for (int jj = -1; jj <= 1; jj++) {
         for (int ii = -1; ii <= 1; ii++) {
@@ -139,57 +135,6 @@ __device__ __inline__
 void orientation(const float* gradientX, const float* gradientY, float* result, int i, int localIdx) {
     result[i] = fmodf(atan2f(gradientY[localIdx], gradientX[localIdx]) * 180 / cuConstParams.PI + 360, 360);
 }
-
-// __device__ __inline__
-// bool keepPixel(const float* mag, const float* magnitude, int indexX, int indexY, int width, int height, int gradient) {
-//     int neighbourOnei = threadIdx.x;
-//     int neighbourOnej = threadIdx.y;
-//     int neighbourTwoi = threadIdx.x;
-//     int neighbourTwoj = threadIdx.y;
-    
-//     switch (gradient) {
-//     case 0:
-//         neighbourOnei -= 1;
-//         neighbourTwoi += 1;
-//         break;
-//     case 45:
-//         neighbourOnej -= 1;
-//         neighbourOnei += 1;
-//         neighbourTwoj += 1;
-//         neighbourTwoi -= 1;
-//         break;
-//     case 90:
-//         neighbourOnej -= 1;
-//         neighbourTwoj += 1;
-//         break;
-//     default: // 135
-//         neighbourOnej -= 1;
-//         neighbourOnei -= 1;
-//         neighbourTwoj += 1;
-//         neighbourTwoi += 1;
-//     }
-    
-//     float neighbourOne, neighbourTwo;
-//     // out of the bound of this block => neighbour's pixel => access global memory
-//     if (neighbourOnei < 0 || neighbourOnei >= TPB_X || neighbourOnej < 0 || neighbourOnej >= TPB_Y){
-//         neighbourOne = mag[(indexY + neighbourOnej) * width + (indexX + neighbourOnei)];
-//     }
-//     // in the bound of this block => access shared memory
-//     else{
-//         neighbourOne = magnitude[neighbourOnej * TPB_X + neighbourOnei];
-//     }
-//     // out of the bound of this block => neighbour's pixel => access global memory
-//     if (neighbourTwoi < 0 || neighbourTwoi >= TPB_X || neighbourTwoj < 0 || neighbourTwoj >= TPB_Y){
-//         neighbourTwo = mag[(indexY + neighbourOnej) * width + (indexX + neighbourOnei)];
-//     }
-//     // in the bound of this block => access shared memory
-//     else{
-//         neighbourTwo = magnitude[neighbourTwoj * TPB_X + neighbourTwoi];
-//     }
-//     float cur = magnitude[threadIdx.y * TPB_X + threadIdx.x];
-    
-//     return (neighbourOne <= cur) && (neighbourTwo <= cur);
-// }
 
 __device__ __inline__
 bool keepPixel(const float* magnitude, int i, int j, int width, int height, int gradient) {
@@ -300,17 +245,11 @@ __global__ void kernelProcessStep2(float* mag, float* orient, rEntry* entries, i
 
     if (indexX >= width || indexY >= height) return;
 
-    // __shared__ float magnitude[TPB]; 
     __shared__ float orientation[TPB]; 
     __shared__ float magThreshold[TPB];
-    // load this block's magnitude and orient value in shared memory, 
-    // decreasing the global memory access
-    // magnitude[localIdx] = mag[index]; 
     orientation[localIdx] = orient[index]; 
     __syncthreads();
     
-    // edgenms(mag, magnitude, orientation, magThreshold, width, height, indexX, indexY, localIdx); 
-    // threshold(magThreshold, magThreshold, cuConstParams.THRESHOLD, index, localIdx);
     edgenms(mag, orientation, magThreshold, width, height, indexX, indexY, localIdx); 
     threshold(magThreshold, magThreshold, cuConstParams.THRESHOLD, index, localIdx);
 
@@ -592,23 +531,6 @@ __global__ void accumulate_kernel_binning_3D(int* accumulator, float* edgePixels
     }
 }
 
-// https://forums.developer.nvidia.com/t/how-to-use-atomiccas-to-implement-atomicadd-short-trouble-adapting-programming-guide-example/22712
-__device__ short atomicAddShort(short* address, short val)
-{
-    unsigned int *base_address = (unsigned int *) ((char *)address - ((size_t)address & 2));	//tera's revised version (showtopic=201975)
-    unsigned int long_val = ((size_t)address & 2) ? ((unsigned int)val << 16) : (unsigned short)val;
-    unsigned int long_old = atomicAdd(base_address, long_val);
-
-    if((size_t)address & 2) {
-        return (short)(long_old >> 16);
-    } else {
-        unsigned int overflow = ((long_old & 0xffff) + long_val) & 0xffff0000;
-        if (overflow)
-            atomicSub(base_address, overflow);
-        return (short)(long_old & 0xffff);
-    }
-}
-
 __global__ void accumulate_kernel_binning_3D_sharedMemory(int* accumulator, float* edgePixels, float* srcOrient, int* blockStarts, int* blockEnds, int width, int height, int wblock, int hblock, rEntry* entries, int* startPos, int tplSize) {
     int blockIndex = blockIdx.x;
     int start = blockStarts[blockIndex];
@@ -645,8 +567,6 @@ __global__ void accumulate_kernel_binning_3D_sharedMemory(int* accumulator, floa
         for (int i = coverage * threadCnt; i < wblock * hblock; i++) accumulatorSlice[i] = 0;
     }
 
-    // __shared__ int cnt;
-    // if (threadIdx.x == 0) cnt = 0;
     __syncthreads();
 
     // access RTable and traverse all entries
@@ -663,12 +583,10 @@ __global__ void accumulate_kernel_binning_3D_sharedMemory(int* accumulator, floa
         if (xc >= 0 && xc < width && yc >= 0 && yc < height) {
             int accumulatorSliceIndex = yc / cuConstParams.blockSize * wblock + xc / cuConstParams.blockSize;
             atomicAdd(accumulatorSlice + accumulatorSliceIndex, 1);
-            // atomicAdd(&cnt, 1);
         }
     }
 
     __syncthreads();
-    // if (threadIdx.x == 0) printf("%d\n", cnt);
     for (int i = sStart; i < eEnd; i++) {
         int accumulatorIndex = is * cuConstParams.nRotationSlices * hblock * wblock
                                + itheta * hblock * wblock
@@ -737,12 +655,10 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
     thrust::device_ptr<float> edgePixelsThrust = thrust::device_pointer_cast(edgePixels); 
     int numEdgePixels = thrust::copy_if(srcThresholdThrust, srcThresholdThrust + width * height, edgePixelsThrust, is_edge()) - edgePixelsThrust;
     cudaCheckError(cudaDeviceSynchronize());
-    // std::cout<<"edge pixel cnt: "<<numEdgePixels<<std::endl;
 
     if (naive) {
-        // (1) naive approach: 1D partition -> divergent control flow on entries
+        // naive approach: 1D partition -> divergent control flow on entries
         // Each block (e.g. 32 threads) take a part of the edge points
-        // Each thread take 1 edge point
         // Write to global CUDA memory atomically
         int threadsPerBlock = 32;
         int blocks = (numEdgePixels + threadsPerBlock - 1) / threadsPerBlock;
@@ -791,18 +707,11 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
                 printf("Please select strategy 0, 1\n");
         }
     } else {
-        // (2) better approach: 
-        //     a. put edge points into buckets by phi
-        //     b. points with the same phi go together in a kernel (1D) each block has the same phi value
-        
         // sort edgePixels by angle
         thrust::sort(edgePixelsThrust, edgePixelsThrust + numEdgePixels, compare_pixel_by_orient(srcOrient));
         cudaCheckError(cudaDeviceSynchronize());
         
         double startBinningTime = CycleTimer::currentSeconds();
-        // traverse sorted edge pixels and find the seperation points O(N)
-        // Possible optimization: binary search O(logN) to find all the seperation points (72), can parallel the bineary search
-        // Use 1 kernel to calculate the following:
         // GPU memory: int[nRotationSlices] (start index for each slice)
         // CPU memory: number of blocks (calculate using threadsPerBlock)
         int* startIndex;
@@ -839,9 +748,6 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
             case 1:
                 {
                     double startKernelTime = CycleTimer::currentSeconds();
-                    // (3) more parallelism: 
-                    //     a. put edge points into buckets by phi
-                    //     b. go by same phi, then same theta, then same scale (3D kernel)
                     dim3 gridDim(numBlocks, params.nRotationSlices, params.nScaleSlices);
                     accumulate_kernel_binning_3D<<<gridDim, threadsPerBlock>>>(accumulator, edgePixels, srcOrient, blockStarts, blockEnds, width, height, wblock, hblock, entries, startPos, tpl->width * tpl->height);
                     cudaCheckError(cudaDeviceSynchronize());
@@ -905,10 +811,6 @@ void CudaGeneralHoughTransform::accumulate(float* srcThreshold, float* srcOrient
     }
 }
 
-// 1. no need to allocate each image in cpu
-// 2. convolve/magnitude/orientation/nms/threshold/createRTable: each thread -> pixel
-// 3. parallel convolveX, convolveY
-// 4. parallel magnitude & orientation
 void CudaGeneralHoughTransform::processTemplate() {
     printf("----------Start processing template----------\n");
     double startAllocateTime = CycleTimer::currentSeconds();
@@ -935,24 +837,10 @@ void CudaGeneralHoughTransform::processTemplate() {
     cudaDeviceSynchronize();
     double endGrayTime = CycleTimer::currentSeconds();
 
-    // GrayImage* grayTpl = new GrayImage;
-    // grayTpl->setGrayImage(tpl->width, tpl->height);
-    // cudaMemcpy(grayTpl->data, tplGrayData, tpl->width * tpl->height * sizeof(float), cudaMemcpyDeviceToHost);
-    // writeGrayPPMImage(grayTpl, "gray1.ppm");
-
     double startStep1Time = CycleTimer::currentSeconds();
     kernelProcessStep1<<<gridDim, blockDim>>>(tplGrayData, mag, orient, tpl->width, tpl->height);
     cudaDeviceSynchronize();
     double endStep1Time = CycleTimer::currentSeconds();
-
-    // GrayImage* magTpl = new GrayImage;
-    // magTpl->setGrayImage(tpl->width, tpl->height);
-    // cudaMemcpy(magTpl->data, mag, tpl->width * tpl->height * sizeof(float), cudaMemcpyDeviceToHost);
-    // writeGrayPPMImage(magTpl, "mag1.ppm");
-    // GrayImage* orientTpl = new GrayImage;
-    // orientTpl->setGrayImage(tpl->width, tpl->height);
-    // cudaMemcpy(orientTpl->data, orient, tpl->width * tpl->height * sizeof(float), cudaMemcpyDeviceToHost);
-    // writeGrayPPMImage(orientTpl, "orient1.ppm");
 
     double startStep2Time = CycleTimer::currentSeconds();
     kernelProcessStep2<<<gridDim, blockDim>>>(mag, orient, entries, tpl->width, tpl->height, true);

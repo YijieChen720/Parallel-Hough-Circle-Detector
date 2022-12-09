@@ -92,11 +92,6 @@ int main(int argc, char** argv) {
     }
     // end parsing of commandline options //////////////////////////////////////
 
-    // Image* templateImage = new Image;
-    // readPPMImage(templateFilename, templateImage);
-    // writePPMImage(templateImage, "test.ppm");
-
-
     std::cout << "***Loading images.***\n";
     if (!ght->loadTemplate(templateFilename) || !ght->loadSource(sourceFilename)) {
         std::cerr << "***Failed to load images.***\n";
