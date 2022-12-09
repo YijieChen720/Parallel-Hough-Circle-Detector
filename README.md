@@ -5,6 +5,12 @@ This is 2022 Fall 15-618 Final Project by Yiliu Xu(yiliux), Yijie Chen(yijieche)
 ## SUMMARY
 We are going to implement a parallel object detector using generalized Hough Transform on GPU. 
 
+## Execution
+```
+make
+./ght -t [template image (PPM format)] -s [source image (PPM format)] -r [seq/cuda]
+```
+
 ## REPORTS
 [Project Report](15618_Report.pdf)  
 [Project Poster](15618_Poster.pdf)  
